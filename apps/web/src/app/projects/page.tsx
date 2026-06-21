@@ -290,7 +290,7 @@ function ProjectsHeader() {
 						<BreadcrumbList>
 							<BreadcrumbItem>
 								<BreadcrumbLink asChild>
-									<Link href="/projects" className="text-sm sm:text-base">
+										<Link href="/" className="text-sm sm:text-base">
 										Home
 									</Link>
 								</BreadcrumbLink>
