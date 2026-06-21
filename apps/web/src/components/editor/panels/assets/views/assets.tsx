@@ -1,11 +1,19 @@
 "use client";
 
 import Image from "next/image";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PanelView } from "@/components/editor/panels/assets/views/base-panel";
 import { MediaDragOverlay } from "@/components/editor/panels/assets/drag-overlay";
 import { DraggableItem } from "@/components/editor/panels/assets/draggable-item";
 import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogBody,
+	DialogContent,
+	DialogDescription,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 import {
 	ContextMenu,
@@ -28,10 +36,7 @@ import {
 import { DEFAULT_NEW_ELEMENT_DURATION } from "@/timeline/creation";
 import { mediaTimeFromSeconds, type MediaTime } from "@/wasm";
 import { useEditor } from "@/editor/use-editor";
-import { useFileUpload } from "@/media/use-file-upload";
 import { invokeAction } from "@/actions";
-import { processMediaAssets } from "@/media/processing";
-import { showMediaUploadToast } from "@/media/upload-toast";
 import {
 	SelectableItem,
 	SelectableSurface,
@@ -48,6 +53,8 @@ import {
 import { MASKABLE_ELEMENT_TYPES } from "@/timeline";
 import type { MediaAsset } from "@/media/types";
 import { cn } from "@/utils/ui";
+import { processMediaAssets } from "@/media/processing";
+import { showMediaUploadToast } from "@/media/upload-toast";
 import {
 	CloudUploadIcon,
 	GridViewIcon,
@@ -58,6 +65,22 @@ import {
 	Video01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
+
+interface RemoteLibraryAsset {
+	id: string;
+	name: string;
+	type: "image" | "video" | "audio";
+	url: string;
+	path: string;
+	mime: string;
+	size: number;
+	duration?: number;
+	width?: number;
+	height?: number;
+	fps?: number;
+	hasAudio?: boolean;
+	thumbnailUrl?: string;
+}
 
 export function MediaView() {
 	const editor = useEditor();
@@ -74,53 +97,86 @@ export function MediaView() {
 		setMediaSort,
 	} = useAssetsPanelStore();
 
-	const [isProcessing, setIsProcessing] = useState(false);
-	const [progress, setProgress] = useState(0);
+	const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
+	const [libraryAssets, setLibraryAssets] = useState<RemoteLibraryAsset[]>([]);
+	const [isLibraryPickerOpen, setIsLibraryPickerOpen] = useState(false);
 
-	const processFiles = async ({ files }: { files: File[] }) => {
-		if (!files || files.length === 0) return;
+	const refreshLibrary = async () => {
+		setIsLoadingLibrary(true);
+		try {
+			const response = await fetch(
+				"/portal/vortex-liquid/designer/media-library",
+				{
+					headers: { Accept: "application/json" },
+				},
+			);
+
+			if (!response.ok) {
+				throw new Error(`Library request failed (${response.status})`);
+			}
+
+			const payload = (await response.json()) as {
+				items?: RemoteLibraryAsset[];
+				images?: RemoteLibraryAsset[];
+				videos?: RemoteLibraryAsset[];
+				audio?: RemoteLibraryAsset[];
+			};
+
+			setLibraryAssets(payload.items ?? []);
+		} catch (error) {
+			console.error("Error loading media library:", error);
+			toast.error("Could not load your media library");
+		} finally {
+			setIsLoadingLibrary(false);
+		}
+	};
+
+	useEffect(() => {
+		void refreshLibrary();
+	}, []);
+
+	const openLibraryPicker = () => {
+		setIsLibraryPickerOpen(true);
+		void refreshLibrary();
+	};
+
+	const importLibraryAsset = async ({
+		asset,
+	}: {
+		asset: RemoteLibraryAsset;
+	}) => {
 		if (!activeProject) {
 			toast.error("No active project");
 			return;
 		}
 
-		setIsProcessing(true);
-		setProgress(0);
 		try {
-			await showMediaUploadToast({
-				filesCount: files.length,
-				promise: async () => {
-					const processedAssets = await processMediaAssets({
-						files,
-						onProgress: (progress: { progress: number }) =>
-							setProgress(progress.progress),
-					});
-					for (const asset of processedAssets) {
-						await editor.media.addMediaAsset({
-							projectId: activeProject.metadata.id,
-							asset,
-						});
-					}
-					return {
-						uploadedCount: processedAssets.length,
-						assetNames: processedAssets.map((asset) => asset.name),
-					};
-				},
+			const response = await fetch(asset.url);
+			if (!response.ok) {
+				throw new Error(`Failed to fetch ${asset.name}`);
+			}
+
+			const blob = await response.blob();
+			const file = new File([blob], asset.name, {
+				type: asset.mime || blob.type || "application/octet-stream",
 			});
+			const [processedAsset] = await processMediaAssets({ files: [file] });
+
+			if (!processedAsset) {
+				throw new Error(`Could not import ${asset.name}`);
+			}
+
+			await editor.media.addMediaAsset({
+				projectId: activeProject.metadata.id,
+				asset: processedAsset,
+			});
+
+			toast.success(`Imported ${asset.name}`);
 		} catch (error) {
-			console.error("Error processing files:", error);
-		} finally {
-			setIsProcessing(false);
-			setProgress(0);
+			console.error("Error importing library asset:", error);
+			toast.error(`Could not import ${asset.name}`);
 		}
 	};
-
-	const { isDragOver, dragProps, openFilePicker, fileInputProps } =
-		useFileUpload({
-			accept: "image/*,video/*,audio/*",
-			multiple: true,
-			onFilesSelected: (files) => processFiles({ files }),
-		});
 
 	const handleRemove = ({
 		event,
@@ -183,54 +239,81 @@ export function MediaView() {
 
 		return filtered;
 	}, [mediaFiles, mediaSortBy, mediaSortOrder]);
+
+	const libraryItems = useMemo(() => {
+		return libraryAssets;
+	}, [libraryAssets]);
+
 	const orderedMediaIds = useMemo(() => {
 		return filteredMediaItems.map((item) => item.id);
 	}, [filteredMediaItems]);
 
 	return (
 		<>
-			<input {...fileInputProps} />
-
 			<PanelView
 				title="Assets"
 				actions={
 					<MediaActions
 						mediaViewMode={mediaViewMode}
 						setMediaViewMode={setMediaViewMode}
-						isProcessing={isProcessing}
+						isProcessing={isLoadingLibrary}
 						sortBy={mediaSortBy}
 						sortOrder={mediaSortOrder}
 						onSort={handleSort}
-						onImport={openFilePicker}
+						onImport={openLibraryPicker}
 					/>
 				}
-				className={cn(isDragOver && "bg-accent/30")}
+				className=""
 				contentClassName="h-full"
-				{...dragProps}
 			>
-				{isDragOver || filteredMediaItems.length === 0 ? (
+				{filteredMediaItems.length === 0 && libraryItems.length === 0 ? (
 					<MediaDragOverlay
 						isVisible={true}
-						isProcessing={isProcessing}
-						progress={progress}
-						onClick={openFilePicker}
+						isProcessing={isLoadingLibrary}
+						onClick={openLibraryPicker}
 					/>
 				) : (
-					<SelectableSurface
-						ariaLabel="Assets"
-						orderedIds={orderedMediaIds}
-						revealId={highlightMediaId}
-						onRevealComplete={clearHighlight}
-					>
-						<MediaScopeRegistrar />
-						<MediaItemList
-							items={filteredMediaItems}
-							mode={mediaViewMode}
-							onRemove={handleRemove}
+					<div className="flex h-full flex-col gap-4 overflow-hidden">
+						<LibraryAssetSection
+							assets={libraryItems}
+							isLoading={isLoadingLibrary}
+							onImport={importLibraryAsset}
 						/>
-					</SelectableSurface>
+						<div className="border-border/60 border-t pt-3">
+							<SelectableSurface
+								ariaLabel="Assets"
+								orderedIds={orderedMediaIds}
+								revealId={highlightMediaId}
+								onRevealComplete={clearHighlight}
+							>
+								<MediaScopeRegistrar />
+								<MediaItemList
+									items={filteredMediaItems}
+									mode={mediaViewMode}
+									onRemove={handleRemove}
+								/>
+							</SelectableSurface>
+						</div>
+					</div>
 				)}
 			</PanelView>
+			<Dialog open={isLibraryPickerOpen} onOpenChange={setIsLibraryPickerOpen}>
+				<DialogContent className="max-h-[90vh] max-w-5xl overflow-hidden p-0">
+					<DialogHeader>
+						<DialogTitle>Choose from media library</DialogTitle>
+						<DialogDescription>
+							Pick files already in your Vortex library and import them into this project.
+						</DialogDescription>
+					</DialogHeader>
+					<DialogBody className="max-h-[70vh] overflow-auto">
+						<LibraryAssetSection
+							assets={libraryItems}
+							isLoading={isLoadingLibrary}
+							onImport={importLibraryAsset}
+						/>
+					</DialogBody>
+				</DialogContent>
+			</Dialog>
 		</>
 	);
 }
@@ -614,6 +697,115 @@ function MediaActions({
 				<HugeiconsIcon icon={CloudUploadIcon} />
 				Import
 			</Button>
+		</div>
+	);
+}
+
+function LibraryAssetSection({
+	assets,
+	isLoading,
+	onImport,
+}: {
+	assets: RemoteLibraryAsset[];
+	isLoading: boolean;
+	onImport: ({ asset }: { asset: RemoteLibraryAsset }) => Promise<void>;
+}) {
+	return (
+		<div className="space-y-3 overflow-auto pb-2">
+			<div className="flex items-center justify-between gap-3">
+				<div>
+					<p className="text-sm font-medium">Your media library</p>
+					<p className="text-muted-foreground text-xs">
+						Files saved to your Vortex account and available to import into this project.
+					</p>
+				</div>
+				{isLoading ? <p className="text-xs opacity-70">Loading...</p> : null}
+			</div>
+			{assets.length === 0 ? (
+				<div className="text-muted-foreground rounded-lg border border-dashed p-4 text-sm">
+					No saved media found in your library yet.
+				</div>
+			) : (
+				<div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+					{assets.map((asset) => (
+						<LibraryAssetCard
+							key={asset.id}
+							asset={asset}
+							onImport={onImport}
+						/>
+					))}
+				</div>
+			)}
+		</div>
+	);
+}
+
+function LibraryAssetCard({
+	asset,
+	onImport,
+}: {
+	asset: RemoteLibraryAsset;
+	onImport: ({ asset }: { asset: RemoteLibraryAsset }) => Promise<void>;
+}) {
+	const preview =
+		asset.type === "image" ? (
+			<div className="relative flex size-full items-center justify-center bg-muted">
+				<Image
+					src={asset.url}
+					alt={asset.name}
+					fill
+					sizes="100vw"
+					className="object-cover"
+					loading="lazy"
+					unoptimized
+				/>
+			</div>
+		) : asset.type === "video" && asset.thumbnailUrl ? (
+			<div className="relative size-full">
+				<Image
+					src={asset.thumbnailUrl}
+					alt={asset.name}
+					fill
+					sizes="100vw"
+					className="object-cover"
+					loading="lazy"
+					unoptimized
+				/>
+				<MediaDurationBadge duration={asset.duration} />
+			</div>
+		) : asset.type === "audio" ? (
+			<MediaTypePlaceholder
+				icon={MusicNote03Icon}
+				label="Audio"
+				duration={asset.duration}
+				variant="bordered"
+			/>
+		) : (
+			<MediaTypePlaceholder icon={Image02Icon} label="Asset" variant="muted" />
+		);
+
+	return (
+		<div className="border-border/70 overflow-hidden rounded-lg border">
+			<div className="aspect-video w-full">{preview}</div>
+			<div className="space-y-3 p-3">
+				<div className="space-y-1">
+					<p className="truncate text-sm font-medium" title={asset.name}>
+						{asset.name}
+					</p>
+					<p className="text-muted-foreground text-xs uppercase tracking-wide">
+						{asset.type} · {Math.round(asset.size / 1024)} KB
+					</p>
+				</div>
+				<Button
+					type="button"
+					variant="secondary"
+					size="sm"
+					className="w-full"
+					onClick={() => void onImport({ asset })}
+				>
+					Import to project
+				</Button>
+			</div>
 		</div>
 	);
 }

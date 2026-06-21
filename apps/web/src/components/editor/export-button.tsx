@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TransitionTopIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -19,6 +19,7 @@ import {
 	getExportFileExtension,
 	downloadBuffer,
 } from "@/export";
+import { toast } from "sonner";
 import { Check, Copy, Download, RotateCcw } from "lucide-react";
 import {
 	EXPORT_FORMAT_VALUES,
@@ -87,20 +88,39 @@ export function ExportButton() {
 					</div>
 				</button>
 			</PopoverTrigger>
-			{hasProject && <ExportPopover onOpenChange={setIsExportPopoverOpen} />}
+			{hasProject && (
+				<ExportPopover
+					isOpen={isExportPopoverOpen}
+					onOpenChange={setIsExportPopoverOpen}
+				/>
+			)}
 		</Popover>
 	);
 }
 
 function ExportPopover({
+	isOpen,
 	onOpenChange,
 }: {
+	isOpen: boolean;
 	onOpenChange: (open: boolean) => void;
 }) {
 	const editor = useEditor();
 	const activeProject = useEditor((e) => e.project.getActive());
 	const exportState = useEditor((e) => e.project.getExportState());
 	const { isExporting, progress, result: exportResult } = exportState;
+	const [isLoadingExports, setIsLoadingExports] = useState(false);
+	const [recentExports, setRecentExports] = useState<
+		Array<{
+			id: number;
+			format?: string;
+			project_name?: string;
+			download_url?: string;
+			file_url?: string;
+			file_size?: number;
+			created_at?: string;
+		}>
+	>([]);
 	const [format, setFormat] = useState<ExportFormat>(
 		DEFAULT_EXPORT_OPTIONS.format,
 	);
@@ -110,6 +130,55 @@ function ExportPopover({
 	const [shouldIncludeAudio, setShouldIncludeAudio] = useState<boolean>(
 		DEFAULT_EXPORT_OPTIONS.includeAudio ?? true,
 	);
+
+	useEffect(() => {
+		if (!isOpen || !activeProject) {
+			return;
+		}
+
+		const exportsUrl =
+			(globalThis as Window & { vortexExportsUrl?: string }).vortexExportsUrl ??
+			"/portal/vortex-liquid/designer/api/my-exports";
+
+		let cancelled = false;
+		const loadExports = async () => {
+			setIsLoadingExports(true);
+			try {
+				const response = await fetch(
+					`${exportsUrl}?project_id=${encodeURIComponent(activeProject.metadata.id)}`,
+					{
+						headers: { Accept: "application/json" },
+					},
+				);
+
+				if (!response.ok) {
+					throw new Error(`Export history failed (${response.status})`);
+				}
+
+				const payload = (await response.json()) as {
+					items?: { data?: Array<any> };
+				};
+				if (!cancelled) {
+					setRecentExports(payload.items?.data ?? []);
+				}
+			} catch (error) {
+				console.error("Failed to load export history:", error);
+				if (!cancelled) {
+					setRecentExports([]);
+				}
+			} finally {
+				if (!cancelled) {
+					setIsLoadingExports(false);
+				}
+			}
+		};
+
+		void loadExports();
+
+		return () => {
+			cancelled = true;
+		};
+	}, [activeProject, isOpen]);
 
 	const handleExport = async () => {
 		if (!activeProject) return;
@@ -129,11 +198,53 @@ function ExportPopover({
 		}
 
 		if (result.success && result.buffer) {
-			downloadBuffer({
-				buffer: result.buffer,
-				filename: `${activeProject.metadata.name}${getExportFileExtension({ format })}`,
-				mimeType: getExportMimeType({ format }),
-			});
+			const exportUrl =
+				(globalThis as Window & { vortexExportUrl?: string }).vortexExportUrl ??
+				`/portal/vortex-liquid/designer/${activeProject.metadata.id}/export`;
+
+			try {
+				const response = await fetch(exportUrl, {
+					method: "POST",
+					headers: {
+						Accept: "application/json",
+					},
+					body: (() => {
+						const formData = new FormData();
+						formData.append(
+							"file",
+							new Blob([result.buffer], { type: getExportMimeType({ format }) }),
+							`${activeProject.metadata.name}${getExportFileExtension({ format })}`,
+						);
+						formData.append("format", format);
+						formData.append("quality", quality);
+						formData.append("include_audio", shouldIncludeAudio ? "1" : "0");
+						return formData;
+					})(),
+				});
+
+				if (!response.ok) {
+					throw new Error(`Export save failed (${response.status})`);
+				}
+
+				const payload = (await response.json()) as {
+					success?: boolean;
+					file_url?: string;
+					download_url?: string;
+				};
+
+				if (!payload.success) {
+					throw new Error("Export save failed");
+				}
+
+				toast.success("Export saved to your Liquid files");
+			} catch (error) {
+				console.error("Failed to save export to Liquid storage:", error);
+				downloadBuffer({
+					buffer: result.buffer,
+					filename: `${activeProject.metadata.name}${getExportFileExtension({ format })}`,
+					mimeType: getExportMimeType({ format }),
+				});
+			}
 
 			editor.project.clearExportState();
 			onOpenChange(false);
@@ -257,6 +368,52 @@ function ExportPopover({
 										<Download className="size-4" />
 										Export
 									</Button>
+								</div>
+
+								<div className="border-t p-3 pt-0">
+									<div className="mb-2 flex items-center justify-between gap-3">
+										<p className="text-sm font-medium">Recent exports</p>
+										{isLoadingExports ? (
+											<p className="text-muted-foreground text-xs">Loading...</p>
+										) : null}
+									</div>
+									<div className="space-y-2">
+										{recentExports.length === 0 ? (
+											<p className="text-muted-foreground text-xs">
+												Completed exports will appear here after Liquid saves them.
+											</p>
+										) : (
+											recentExports.map((item) => {
+												const downloadHref = item.download_url ?? item.file_url ?? "";
+												return (
+													<div
+														key={item.id}
+														className="border-border/60 flex items-center justify-between gap-3 rounded-md border px-3 py-2"
+													>
+														<div className="min-w-0">
+															<p className="truncate text-sm font-medium">
+																{item.project_name ?? "Project export"}
+															</p>
+															<p className="text-muted-foreground text-xs">
+																{item.format?.toUpperCase() ?? "VIDEO"}
+																{item.file_size ? ` · ${Math.round(item.file_size / 1024)} KB` : ""}
+															</p>
+														</div>
+														{downloadHref ? (
+															<a
+																href={downloadHref}
+																target="_blank"
+																rel="noreferrer"
+																className="text-primary text-sm font-medium"
+															>
+																Download
+															</a>
+														) : null}
+													</div>
+												);
+											})
+										)}
+									</div>
 								</div>
 							</>
 						)}

@@ -15,6 +15,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useEditor } from "@/editor/use-editor";
+import { RenameProjectDialog } from "@/project/components/rename-project-dialog";
 import { useProjectsStore } from "./store";
 import type {
 	TProjectMetadata,
@@ -64,7 +65,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { DeleteProjectDialog } from "@/project/components/delete-project-dialog";
 import { ProjectInfoDialog } from "@/project/components/project-info-dialog";
-import { RenameProjectDialog } from "@/project/components/rename-project-dialog";
 import { cn } from "@/utils/ui";
 import { ChangelogNotification } from "@/changelog/components/changelog-notification";
 const formatProjectDuration = ({
@@ -90,12 +90,63 @@ export default function ProjectsPage() {
 	const { searchQuery, sortKey, sortOrder, viewMode } = useProjectsStore();
 	const editor = useEditor();
 	const sortOption: TProjectSortOption = `${sortKey}-${sortOrder}`;
+	const [recentExports, setRecentExports] = useState<
+		Array<{
+			id: number;
+			project_name?: string | null;
+			format?: string;
+			download_url?: string | null;
+			file_size?: number | null;
+			created_at?: string | null;
+		}>
+	>([]);
+	const [isLoadingExports, setIsLoadingExports] = useState(false);
 
 	const isLoading = useEditor((e) => e.project.getIsLoading());
 	const isInitialized = useEditor((e) => e.project.getIsInitialized());
 	const projectsToDisplay = useEditor((e) =>
 		e.project.getFilteredAndSortedProjects({ searchQuery, sortOption }),
 	);
+
+	useEffect(() => {
+		let cancelled = false;
+
+		const loadExports = async () => {
+			setIsLoadingExports(true);
+			try {
+				const response = await fetch("/portal/vortex-liquid/designer/api/my-exports", {
+					headers: { Accept: "application/json" },
+				});
+
+				if (!response.ok) {
+					throw new Error(`Failed to load exports (${response.status})`);
+				}
+
+				const payload = (await response.json()) as {
+					items?: { data?: Array<any> };
+				};
+
+				if (!cancelled) {
+					setRecentExports(payload.items?.data ?? []);
+				}
+			} catch (error) {
+				console.error("Failed to load exports:", error);
+				if (!cancelled) {
+					setRecentExports([]);
+				}
+			} finally {
+				if (!cancelled) {
+					setIsLoadingExports(false);
+				}
+			}
+		};
+
+		void loadExports();
+
+		return () => {
+			cancelled = true;
+		};
+	}, []);
 
 	useEffect(() => {
 		if (!editor.project.getIsInitialized()) {
@@ -133,6 +184,97 @@ export default function ProjectsPage() {
 					</div>
 				)}
 			</main>
+			<RecentExportsPanel
+				exports={recentExports}
+				isLoading={isLoadingExports}
+			/>
+		</div>
+	);
+}
+
+function RecentExportsPanel({
+	exports,
+	isLoading,
+}: {
+	exports: Array<{
+		id: number;
+		project_name?: string | null;
+		format?: string;
+		download_url?: string | null;
+		file_size?: number | null;
+		created_at?: string | null;
+	}>;
+	isLoading: boolean;
+}) {
+	if (isLoading && exports.length === 0) {
+		return (
+			<div className="mx-auto px-4 pb-8">
+				<Card className="border-border/70 bg-background/80 overflow-hidden">
+					<CardContent className="space-y-3 p-5">
+						<Skeleton className="h-5 w-40" />
+						<Skeleton className="h-4 w-full max-w-2xl" />
+						<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+							{Array.from({ length: 3 }, (_, index) => (
+								<Skeleton key={index} className="h-16 rounded-lg" />
+							))}
+						</div>
+					</CardContent>
+				</Card>
+			</div>
+		);
+	}
+
+	return (
+		<div className="mx-auto px-4 pb-8">
+			<Card className="border-border/70 bg-background/80 overflow-hidden">
+				<CardContent className="space-y-4 p-5">
+					<div className="flex items-center justify-between gap-3">
+						<div>
+							<p className="text-sm font-semibold">Recent exports</p>
+							<p className="text-muted-foreground text-xs">
+								Your latest Liquid renders saved to the server.
+							</p>
+						</div>
+						{exports.length > 0 ? (
+							<span className="text-muted-foreground text-xs">
+								{exports.length} item{exports.length === 1 ? "" : "s"}
+							</span>
+						) : null}
+					</div>
+
+					{exports.length === 0 ? (
+						<div className="text-muted-foreground rounded-xl border border-dashed px-4 py-8 text-center text-sm">
+							No exports yet. Export a project in the editor and it will appear here.
+						</div>
+					) : (
+						<div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+							{exports.map((item) => (
+								<div
+									key={item.id}
+									className="border-border/60 flex items-center justify-between gap-3 rounded-xl border px-4 py-3"
+								>
+									<div className="min-w-0">
+										<p className="truncate text-sm font-medium">
+											{item.project_name || "Project export"}
+										</p>
+										<p className="text-muted-foreground text-xs">
+											{item.format?.toUpperCase() || "VIDEO"}
+											{item.file_size ? ` · ${Math.round(item.file_size / 1024)} KB` : ""}
+										</p>
+									</div>
+									{item.download_url ? (
+										<Button asChild size="sm" variant="outline">
+											<a href={item.download_url} target="_blank" rel="noreferrer">
+												Download
+											</a>
+										</Button>
+									) : null}
+								</div>
+							))}
+						</div>
+					)}
+				</CardContent>
+			</Card>
 		</div>
 	);
 }
@@ -148,7 +290,7 @@ function ProjectsHeader() {
 						<BreadcrumbList>
 							<BreadcrumbItem>
 								<BreadcrumbLink asChild>
-									<Link href="/" className="text-sm sm:text-base">
+									<Link href="/projects" className="text-sm sm:text-base">
 										Home
 									</Link>
 								</BreadcrumbLink>
@@ -507,23 +649,40 @@ function SortDropdown({ children }: { children: React.ReactNode }) {
 function NewProjectButton() {
 	const editor = useEditor();
 	const router = useRouter();
+	const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 
 	const handleCreateProject = async () => {
+		setIsCreateDialogOpen(true);
+	};
+
+	const handleConfirmCreateProject = async (name: string) => {
+		const projectName = name.trim() || "New project";
 		const projectId = await editor.project.createNewProject({
-			name: "New project",
+			name: projectName,
 		});
+		setIsCreateDialogOpen(false);
 		router.push(`/editor/${projectId}`);
 	};
 
 	return (
-		<Button
-			size="lg"
-			className="flex px-5 md:px-6"
-			onClick={handleCreateProject}
-		>
-			<span className="text-sm font-medium hidden md:block">New project</span>
-			<span className="text-sm font-medium block md:hidden">New</span>
-		</Button>
+		<>
+			<Button
+				size="lg"
+				className="flex px-5 md:px-6"
+				onClick={handleCreateProject}
+			>
+				<span className="text-sm font-medium hidden md:block">New project</span>
+				<span className="text-sm font-medium block md:hidden">New</span>
+			</Button>
+			<RenameProjectDialog
+				isOpen={isCreateDialogOpen}
+				onOpenChange={setIsCreateDialogOpen}
+				onConfirm={handleConfirmCreateProject}
+				projectName="New project"
+				title="Create project"
+				confirmLabel="Create"
+			/>
+		</>
 	);
 }
 

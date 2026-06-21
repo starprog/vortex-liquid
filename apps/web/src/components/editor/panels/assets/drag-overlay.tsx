@@ -41,8 +41,8 @@ export function MediaDragOverlay({
 			<div className="space-y-2">
 				<p className="text-muted-foreground max-w-sm text-xs">
 					{isProcessing
-						? `Processing your files (${progress}%)`
-						: "Drag and drop videos, photos, and audio files here"}
+						? `Loading your library (${progress}%)`
+						: "Your media library is empty. Add files to your Vortex library and come back here to import them."}
 				</p>
 			</div>
 

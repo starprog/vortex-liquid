@@ -16,11 +16,15 @@ export function RenameProjectDialog({
 	onOpenChange,
 	onConfirm,
 	projectName,
+	title = "Rename project",
+	confirmLabel = "Rename",
 }: {
 	isOpen: boolean;
 	onOpenChange: (open: boolean) => void;
 	onConfirm: (newName: string) => void;
 	projectName: string;
+	title?: string;
+	confirmLabel?: string;
 }) {
 	const [name, setName] = useState(projectName);
 
@@ -35,7 +39,7 @@ export function RenameProjectDialog({
 		<Dialog open={isOpen} onOpenChange={handleOpenChange}>
 			<DialogContent>
 				<DialogHeader>
-					<DialogTitle>Rename project</DialogTitle>
+					<DialogTitle>{title}</DialogTitle>
 				</DialogHeader>
 
 				<DialogBody className="gap-3">
@@ -64,7 +68,7 @@ export function RenameProjectDialog({
 					>
 						Cancel
 					</Button>
-					<Button onClick={() => onConfirm(name)}>Rename</Button>
+					<Button onClick={() => onConfirm(name)}>{confirmLabel}</Button>
 				</DialogFooter>
 			</DialogContent>
 		</Dialog>
