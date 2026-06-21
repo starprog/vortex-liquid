@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PanelView } from "@/components/editor/panels/assets/views/base-panel";
 import { MediaDragOverlay } from "@/components/editor/panels/assets/drag-overlay";
 import { DraggableItem } from "@/components/editor/panels/assets/draggable-item";
@@ -100,6 +100,7 @@ export function MediaView() {
 	const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
 	const [libraryAssets, setLibraryAssets] = useState<RemoteLibraryAsset[]>([]);
 	const [isLibraryPickerOpen, setIsLibraryPickerOpen] = useState(false);
+	const uploadInputRef = useRef<HTMLInputElement>(null);
 
 	const refreshLibrary = async () => {
 		setIsLoadingLibrary(true);
@@ -172,10 +173,62 @@ export function MediaView() {
 			});
 
 			toast.success(`Imported ${asset.name}`);
+			setIsLibraryPickerOpen(false);
 		} catch (error) {
 			console.error("Error importing library asset:", error);
 			toast.error(`Could not import ${asset.name}`);
 		}
+	};
+
+	const importDeviceFiles = async ({ files }: { files: File[] }) => {
+		if (!activeProject) {
+			toast.error("No active project");
+			return;
+		}
+
+		if (files.length === 0) {
+			return;
+		}
+
+		const result = await showMediaUploadToast({
+			filesCount: files.length,
+			promise: async () => {
+				const processedAssets = await processMediaAssets({ files });
+				const uploadedNames: string[] = [];
+
+				for (const asset of processedAssets) {
+					if (!asset) continue;
+
+					await editor.media.addMediaAsset({
+						projectId: activeProject.metadata.id,
+						asset,
+					});
+
+					uploadedNames.push(asset.name);
+				}
+
+				return {
+					uploadedCount: uploadedNames.length,
+					assetNames: uploadedNames,
+				};
+			},
+		});
+
+		if (result.uploadedCount > 0) {
+			setIsLibraryPickerOpen(false);
+		}
+	};
+
+	const openDevicePicker = () => {
+		uploadInputRef.current?.click();
+	};
+
+	const handleDevicePickerChange = (
+		event: React.ChangeEvent<HTMLInputElement>,
+	) => {
+		const files = Array.from(event.target.files ?? []);
+		void importDeviceFiles({ files });
+		event.target.value = "";
 	};
 
 	const handleRemove = ({
@@ -240,13 +293,12 @@ export function MediaView() {
 		return filtered;
 	}, [mediaFiles, mediaSortBy, mediaSortOrder]);
 
-	const libraryItems = useMemo(() => {
-		return libraryAssets;
-	}, [libraryAssets]);
-
 	const orderedMediaIds = useMemo(() => {
 		return filteredMediaItems.map((item) => item.id);
 	}, [filteredMediaItems]);
+
+	const projectAssetCount = filteredMediaItems.length;
+	const libraryAssetCount = libraryAssets.length;
 
 	return (
 		<>
@@ -266,48 +318,76 @@ export function MediaView() {
 				className=""
 				contentClassName="h-full"
 			>
-				{filteredMediaItems.length === 0 && libraryItems.length === 0 ? (
+				{filteredMediaItems.length === 0 ? (
 					<MediaDragOverlay
 						isVisible={true}
 						isProcessing={isLoadingLibrary}
 						onClick={openLibraryPicker}
 					/>
 				) : (
-					<div className="flex h-full flex-col gap-4 overflow-hidden">
-						<LibraryAssetSection
-							assets={libraryItems}
-							isLoading={isLoadingLibrary}
-							onImport={importLibraryAsset}
+					<SelectableSurface
+						ariaLabel="Assets"
+						orderedIds={orderedMediaIds}
+						revealId={highlightMediaId}
+						onRevealComplete={clearHighlight}
+					>
+						<MediaScopeRegistrar />
+						<MediaItemList
+							items={filteredMediaItems}
+							mode={mediaViewMode}
+							onRemove={handleRemove}
 						/>
-						<div className="border-border/60 border-t pt-3">
-							<SelectableSurface
-								ariaLabel="Assets"
-								orderedIds={orderedMediaIds}
-								revealId={highlightMediaId}
-								onRevealComplete={clearHighlight}
-							>
-								<MediaScopeRegistrar />
-								<MediaItemList
-									items={filteredMediaItems}
-									mode={mediaViewMode}
-									onRemove={handleRemove}
-								/>
-							</SelectableSurface>
-						</div>
-					</div>
+					</SelectableSurface>
 				)}
 			</PanelView>
+			<input
+				ref={uploadInputRef}
+				type="file"
+				accept="image/*,video/*,audio/*"
+				multiple
+				className="hidden"
+				onChange={handleDevicePickerChange}
+			/>
 			<Dialog open={isLibraryPickerOpen} onOpenChange={setIsLibraryPickerOpen}>
 				<DialogContent className="max-h-[90vh] max-w-5xl overflow-hidden p-0">
 					<DialogHeader>
-						<DialogTitle>Choose from media library</DialogTitle>
+						<DialogTitle>Import assets</DialogTitle>
 						<DialogDescription>
-							Pick files already in your Vortex library and import them into this project.
+							Choose files from your Vortex library or upload directly from your device.
 						</DialogDescription>
 					</DialogHeader>
 					<DialogBody className="max-h-[70vh] overflow-auto">
+						<div className="mb-4 flex items-center justify-between gap-3">
+							<div className="flex items-center gap-2">
+								<span className="bg-muted text-muted-foreground rounded-md px-2 py-1 text-xs">
+									Project: {projectAssetCount}
+								</span>
+								<span className="bg-muted text-muted-foreground rounded-md px-2 py-1 text-xs">
+									Library: {libraryAssetCount}
+								</span>
+							</div>
+							<div className="flex items-center gap-2">
+							<Button
+								type="button"
+								variant="outline"
+								onClick={openDevicePicker}
+								className="items-center justify-center gap-1.5"
+							>
+								<HugeiconsIcon icon={CloudUploadIcon} />
+								Upload from device
+							</Button>
+							<Button
+								type="button"
+								variant="ghost"
+								onClick={() => void refreshLibrary()}
+								disabled={isLoadingLibrary}
+							>
+								Refresh
+							</Button>
+							</div>
+						</div>
 						<LibraryAssetSection
-							assets={libraryItems}
+							assets={libraryAssets}
 							isLoading={isLoadingLibrary}
 							onImport={importLibraryAsset}
 						/>
@@ -695,7 +775,7 @@ function MediaActions({
 				className="items-center justify-center gap-1.5"
 			>
 				<HugeiconsIcon icon={CloudUploadIcon} />
-				Import
+				Add media
 			</Button>
 		</div>
 	);
