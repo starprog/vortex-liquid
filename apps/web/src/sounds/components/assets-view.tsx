@@ -22,8 +22,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
+import { useEditor } from "@/editor/use-editor";
 import { useSoundSearch } from "@/sounds/use-sound-search";
 import { useSoundsStore } from "@/sounds/sounds-store";
+import type { MediaAsset } from "@/media/types";
 import type { SavedSound, SoundEffect } from "@/sounds/types";
 import { cn } from "@/utils/ui";
 import {
@@ -41,8 +43,8 @@ export function SoundsView() {
 			<Tabs defaultValue="sound-effects" className="flex h-full flex-col">
 				<div className="px-3 pt-4 pb-0">
 					<TabsList>
-						<TabsTrigger value="sound-effects">Sound effects</TabsTrigger>
-						<TabsTrigger value="saved">Saved</TabsTrigger>
+						<TabsTrigger value="sound-effects">Sounds</TabsTrigger>
+						<TabsTrigger value="saved">Saved sounds</TabsTrigger>
 					</TabsList>
 				</div>
 				<Separator className="my-4" />
@@ -64,6 +66,7 @@ export function SoundsView() {
 }
 
 function SoundEffectsView() {
+	const mediaAssets = useEditor((editor) => editor.media.getAssets());
 	const {
 		topSoundEffects,
 		isLoading,
@@ -195,6 +198,9 @@ function SoundEffectsView() {
 	};
 
 	const displayedSounds = searchQuery ? searchResults : topSoundEffects;
+	const projectSounds = mediaAssets
+		.filter((asset) => (asset.type === "audio" || asset.hasAudio) && !!asset.url)
+		.map((asset, index) => convertProjectMediaToSound({ asset, index }));
 
 	const playSound = ({ sound }: { sound: SoundEffect }) => {
 		if (playingId === sound.id) {
@@ -227,7 +233,7 @@ function SoundEffectsView() {
 		<div className="mt-1 flex h-full flex-col gap-5">
 			<div className="flex items-center gap-3">
 				<Input
-					placeholder="Search sound effects"
+					placeholder="Search sounds"
 					className="w-full"
 					containerClassName="w-full"
 					value={searchQuery}
@@ -270,6 +276,25 @@ function SoundEffectsView() {
 					onScrollCapture={handleScrollWithPosition}
 				>
 					<div className="flex flex-col gap-4">
+						{!searchQuery && projectSounds.length > 0 && (
+							<>
+								<div className="flex flex-col gap-1">
+									<p className="text-sm font-medium">Project sounds</p>
+									<p className="text-muted-foreground text-xs">
+										Audio already available from your uploaded media and videos.
+									</p>
+								</div>
+								{projectSounds.map((sound) => (
+									<AudioItem
+										key={`project-${sound.id}`}
+										sound={sound}
+										isPlaying={playingId === sound.id}
+										onPlay={playSound}
+									/>
+								))}
+								<Separator />
+							</>
+						)}
 						{isLoading && !searchQuery && (
 							<div className="text-muted-foreground text-sm">
 								Loading sounds...
@@ -286,7 +311,7 @@ function SoundEffectsView() {
 								onPlay={playSound}
 							/>
 						))}
-						{!isLoading && !isSearching && displayedSounds.length === 0 && (
+						{!isLoading && !isSearching && displayedSounds.length === 0 && projectSounds.length === 0 && (
 							<div className="text-muted-foreground text-sm">
 								{searchQuery ? "No sounds found" : "No sounds available"}
 							</div>
@@ -301,6 +326,37 @@ function SoundEffectsView() {
 			</div>
 		</div>
 	);
+}
+
+function convertProjectMediaToSound({
+	asset,
+	index,
+}: {
+	asset: MediaAsset;
+	index: number;
+}): SoundEffect {
+	return {
+		id: -(index + 1),
+		name: asset.name,
+		description: "",
+		url: asset.url ?? "",
+		previewUrl: asset.url,
+		downloadUrl: asset.url,
+		duration: asset.duration ?? 0,
+		filesize: asset.file.size,
+		type: asset.type === "video" ? "project-video-audio" : "project-audio",
+		channels: 0,
+		bitrate: 0,
+		bitdepth: 0,
+		samplerate: 0,
+		username: "Project media",
+		tags: ["project"],
+		license: "Project",
+		created: new Date().toISOString(),
+		downloads: 0,
+		rating: 0,
+		ratingCount: 0,
+	};
 }
 
 function SavedSoundsView() {

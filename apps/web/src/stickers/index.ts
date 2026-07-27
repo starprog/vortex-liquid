@@ -282,6 +282,33 @@ export async function browseAll({
 		}
 	}
 
+	if (sections.length === 0) {
+		const fallbackProvider = getProviderByCategory({ category: "shapes" });
+		if (fallbackProvider) {
+			try {
+				const fallbackBrowse = await fallbackProvider.browse({
+					options: { limit },
+				});
+				const fallbackSection = fallbackBrowse.sections[0];
+				if (fallbackSection && fallbackSection.items.length > 0) {
+					sections.push({
+						...fallbackSection,
+						id: "shapes",
+						title: STICKER_CATEGORIES.shapes,
+						layout: "row",
+						action: {
+							type: "see-all",
+							category: "shapes",
+							sectionId: fallbackSection.id,
+						},
+					});
+				}
+			} catch {
+				// Ignore fallback failures and preserve empty state.
+			}
+		}
+	}
+
 	return { sections };
 }
 

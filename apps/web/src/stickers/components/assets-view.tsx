@@ -133,7 +133,13 @@ function StickerRow({ items }: { items: StickerData[] }) {
 	);
 }
 
-function EmptyView({ message }: { message: string }) {
+function EmptyView({
+	message,
+	onTryBuiltIn,
+}: {
+	message: string;
+	onTryBuiltIn?: () => void;
+}) {
 	return (
 		<div className="bg-background flex h-full flex-col items-center justify-center gap-3 p-4">
 			<HugeiconsIcon
@@ -144,6 +150,15 @@ function EmptyView({ message }: { message: string }) {
 				<p className="text-lg font-medium">No stickers found</p>
 				<p className="text-muted-foreground text-sm text-balance">{message}</p>
 			</div>
+			{onTryBuiltIn && (
+				<Button
+					size="sm"
+					variant="outline"
+					onClick={onTryBuiltIn}
+				>
+					Use built-in shapes
+				</Button>
+			)}
 		</div>
 	);
 }
@@ -215,7 +230,16 @@ function StickersContentView() {
 
 		// "all" tab search — sections are in browseContent, fall through to section rendering below
 		if (selectedCategory !== "all" && searchQuery) {
-			return <EmptyView message={`No stickers found for "${searchQuery}"`} />;
+			return (
+				<EmptyView
+					message={`No stickers found for "${searchQuery}"`}
+					onTryBuiltIn={
+						selectedCategory === "shapes"
+							? undefined
+							: () => setSelectedCategory({ category: "shapes" })
+					}
+				/>
+			);
 		}
 	}
 
@@ -237,6 +261,11 @@ function StickersContentView() {
 						: selectedCategory === "all"
 							? "No stickers available yet."
 							: `No stickers available in ${categoryLabel.toLowerCase()} yet.`
+				}
+				onTryBuiltIn={
+					selectedCategory === "shapes"
+						? undefined
+						: () => setSelectedCategory({ category: "shapes" })
 				}
 			/>
 		);

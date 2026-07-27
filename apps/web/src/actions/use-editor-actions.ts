@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { useTimelineStore } from "@/timeline/timeline-store";
 import { useActionHandler } from "@/actions/use-action-handler";
 import { useEditor } from "@/editor/use-editor";
@@ -19,7 +20,14 @@ import { useKeyframeSelection } from "@/timeline/hooks/element/use-keyframe-sele
 import { getElementsAtTime, hasMediaId } from "@/timeline";
 import { cancelInteraction } from "@/editor/cancel-interaction";
 import { invokeAction } from "@/actions";
-import { canToggleSourceAudio } from "@/timeline/audio-separation";
+import {
+	buildSeparatedAudioElement,
+	canExtractSourceAudio,
+	canRecoverSourceAudio,
+	canToggleSourceAudio,
+} from "@/timeline/audio-separation";
+import { extractMediaFileAudio } from "@/media/mediabunny";
+import { processMediaAssets } from "@/media/processing";
 import {
 	activateScope,
 	clearActiveScope,
@@ -364,10 +372,69 @@ export function useEditorActions() {
 				return;
 			}
 
-			editor.timeline.toggleSourceAudioSeparation({
-				trackId: selectedElement.track.id,
-				elementId: selectedElement.element.id,
-			});
+			if (canRecoverSourceAudio(selectedElement.element)) {
+				editor.timeline.toggleSourceAudioSeparation({
+					trackId: selectedElement.track.id,
+					elementId: selectedElement.element.id,
+				});
+				return;
+			}
+
+			if (!canExtractSourceAudio(selectedElement.element, mediaAsset) || !mediaAsset) {
+				return;
+			}
+
+			void (async () => {
+				try {
+					const audioBlob = await extractMediaFileAudio({ file: mediaAsset.file });
+					const audioExtension = audioBlob.type === "audio/mpeg" ? "mp3" : "wav";
+					const audioFile = new File(
+						[audioBlob],
+						`${selectedElement.element.name} (Extracted Audio).${audioExtension}`,
+						{ type: audioBlob.type || "audio/wav" },
+					);
+					const [processedAsset] = await processMediaAssets({ files: [audioFile] });
+					if (!processedAsset) {
+						throw new Error("Could not process extracted audio");
+					}
+
+					const createdAsset = await editor.media.addMediaAsset({
+						projectId: editor.project.getActive().metadata.id,
+						asset: processedAsset,
+					});
+					if (!createdAsset) {
+						throw new Error("Could not save extracted audio");
+					}
+
+					const separatedAudioElement = {
+						...buildSeparatedAudioElement({ sourceElement: selectedElement.element }),
+						mediaId: createdAsset.id,
+						name: createdAsset.name,
+					};
+
+					editor.timeline.insertElement({
+						element: separatedAudioElement,
+						placement: { mode: "auto", trackType: "audio" },
+					});
+					editor.timeline.updateElements({
+						updates: [
+							{
+								trackId: selectedElement.track.id,
+								elementId: selectedElement.element.id,
+								patch: { isSourceAudioEnabled: false },
+							},
+						],
+					});
+					toast.success("Audio extracted to project sounds");
+				} catch (error) {
+					console.error("Failed to extract source audio:", error);
+					toast.error(
+						error instanceof Error
+							? error.message
+							: "Failed to extract audio",
+					);
+				}
+			})();
 		},
 		undefined,
 	);
