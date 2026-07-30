@@ -64,6 +64,33 @@ function resolveLibraryEndpoint(): string {
 	return "/portal/vortex-liquid/designer/media-library";
 }
 
+function resolveSoundsApiBasePath(): string {
+	if (typeof window === "undefined") {
+		return "/liquid/api";
+	}
+
+	const nextData = (
+		window as Window & { __NEXT_DATA__?: { assetPrefix?: string } }
+	).__NEXT_DATA__;
+	const assetPrefix = nextData?.assetPrefix?.trim() ?? "";
+
+	if (assetPrefix && assetPrefix !== "/") {
+		return `${assetPrefix.replace(/\/+$/, "")}/api`;
+	}
+
+	const currentPath = window.location.pathname;
+	const projectsIndex = currentPath.indexOf("/projects");
+
+	if (projectsIndex > 0) {
+		const prefix = currentPath.slice(0, projectsIndex).replace(/\/+$/, "");
+		if (prefix) {
+			return `${prefix}/api`;
+		}
+	}
+
+	return "/liquid/api";
+}
+
 export function SoundsView() {
 	return (
 		<div className="flex h-full flex-col">
@@ -95,6 +122,7 @@ export function SoundsView() {
 function SoundEffectsView() {
 	const mediaAssets = useEditor((editor) => editor.media.getAssets());
 	const libraryEndpoint = useMemo(() => resolveLibraryEndpoint(), []);
+	const soundsApiBasePath = useMemo(() => resolveSoundsApiBasePath(), []);
 	const {
 		topSoundEffects,
 		isLoading,
@@ -123,6 +151,7 @@ function SoundEffectsView() {
 	} = useSoundSearch({
 		query: searchQuery,
 		commercialOnly: showCommercialOnly,
+		apiBasePath: soundsApiBasePath,
 	});
 
 	const [playingId, setPlayingId] = useState<number | null>(null);
@@ -156,7 +185,7 @@ function SoundEffectsView() {
 				}
 
 				const response = await fetch(
-					"/api/sounds/search?page_size=50&sort=downloads",
+					`${soundsApiBasePath}/sounds/search?page_size=50&sort=downloads`,
 				);
 
 				if (!shouldIgnore) {
@@ -195,6 +224,7 @@ function SoundEffectsView() {
 		};
 	}, [
 		hasLoaded,
+		soundsApiBasePath,
 		setTopSoundEffects,
 		setLoading,
 		setError,

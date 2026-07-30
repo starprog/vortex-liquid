@@ -4,9 +4,11 @@ import { useSoundsStore } from "@/sounds/sounds-store";
 export function useSoundSearch({
 	query,
 	commercialOnly,
+	apiBasePath,
 }: {
 	query: string;
 	commercialOnly: boolean;
+	apiBasePath: string;
 }) {
 	const {
 		searchResults,
@@ -48,7 +50,7 @@ export function useSoundSearch({
 
 			searchParams.set("commercial_only", commercialOnly.toString());
 			const response = await fetch(
-				`/api/sounds/search?${searchParams.toString()}`,
+				`${apiBasePath}/sounds/search?${searchParams.toString()}`,
 			);
 
 			if (response.ok) {
@@ -96,7 +98,7 @@ export function useSoundSearch({
 				resetPagination();
 
 				const response = await fetch(
-					`/api/sounds/search?q=${encodeURIComponent(query)}&type=effects&page=1`,
+					`${apiBasePath}/sounds/search?q=${encodeURIComponent(query)}&type=effects&page=1`,
 				);
 
 				if (!ignore) {
@@ -131,6 +133,7 @@ export function useSoundSearch({
 	}, [
 		query,
 		lastSearchQuery,
+		apiBasePath,
 		searchResults.length,
 		setSearchResults,
 		setSearching,
