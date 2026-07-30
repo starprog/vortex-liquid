@@ -57,6 +57,7 @@ class StorageService {
 	private config: StorageConfig;
 	private migrationsPromise: Promise<void> | null = null;
 	private tenantNamespace: string;
+	private readonly savedSoundsLocalStoragePrefix = "video-editor-saved-sounds-fallback";
 
 	private resolveTenantNamespace(): string {
 		if (typeof window === "undefined") {
@@ -70,6 +71,62 @@ class StorageService {
 			return sanitized || "default";
 		} catch {
 			return "default";
+		}
+	}
+
+	private getSavedSoundsLocalStorageKey(): string {
+		return `${this.savedSoundsLocalStoragePrefix}-${this.tenantNamespace}`;
+	}
+
+	private loadSavedSoundsFromLocalStorage(): SavedSoundsData {
+		if (typeof window === "undefined") {
+			return { sounds: [], lastModified: new Date().toISOString() };
+		}
+
+		try {
+			const raw = window.localStorage.getItem(this.getSavedSoundsLocalStorageKey());
+			if (!raw) {
+				return { sounds: [], lastModified: new Date().toISOString() };
+			}
+
+			const parsed = JSON.parse(raw) as SavedSoundsData;
+			if (!parsed || !Array.isArray(parsed.sounds)) {
+				return { sounds: [], lastModified: new Date().toISOString() };
+			}
+
+			return {
+				sounds: parsed.sounds,
+				lastModified: parsed.lastModified || new Date().toISOString(),
+			};
+		} catch {
+			return { sounds: [], lastModified: new Date().toISOString() };
+		}
+	}
+
+	private saveSavedSoundsToLocalStorage({ data }: { data: SavedSoundsData }): void {
+		if (typeof window === "undefined") {
+			return;
+		}
+
+		try {
+			window.localStorage.setItem(
+				this.getSavedSoundsLocalStorageKey(),
+				JSON.stringify(data),
+			);
+		} catch {
+			// Ignore localStorage write failures.
+		}
+	}
+
+	private clearSavedSoundsFromLocalStorage(): void {
+		if (typeof window === "undefined") {
+			return;
+		}
+
+		try {
+			window.localStorage.removeItem(this.getSavedSoundsLocalStorageKey());
+		} catch {
+			// Ignore localStorage clear failures.
 		}
 	}
 
@@ -487,15 +544,16 @@ class StorageService {
 	async loadSavedSounds(): Promise<SavedSoundsData> {
 		try {
 			const savedSoundsData = await this.savedSoundsAdapter.get("user-sounds");
-			return (
+			const resolved =
 				savedSoundsData || {
 					sounds: [],
 					lastModified: new Date().toISOString(),
-				}
-			);
+				};
+			this.saveSavedSoundsToLocalStorage({ data: resolved });
+			return resolved;
 		} catch (error) {
 			console.error("Failed to load saved sounds:", error);
-			return { sounds: [], lastModified: new Date().toISOString() };
+			return this.loadSavedSoundsFromLocalStorage();
 		}
 	}
 
@@ -504,6 +562,18 @@ class StorageService {
 	}: {
 		soundEffect: SoundEffect;
 	}): Promise<void> {
+		const writeSavedData = async ({ data }: { data: SavedSoundsData }) => {
+			try {
+				await this.savedSoundsAdapter.set({
+					key: "user-sounds",
+					value: data,
+				});
+			} catch {
+				// Ignore adapter write failure here and keep local fallback in sync.
+			}
+			this.saveSavedSoundsToLocalStorage({ data });
+		};
+
 		try {
 			const currentData = await this.loadSavedSounds();
 
@@ -527,11 +597,7 @@ class StorageService {
 				sounds: [...currentData.sounds, savedSound],
 				lastModified: new Date().toISOString(),
 			};
-
-			await this.savedSoundsAdapter.set({
-				key: "user-sounds",
-				value: updatedData,
-			});
+			await writeSavedData({ data: updatedData });
 		} catch (error) {
 			console.error("Failed to save sound effect:", error);
 			throw error;
@@ -547,10 +613,16 @@ class StorageService {
 				lastModified: new Date().toISOString(),
 			};
 
-			await this.savedSoundsAdapter.set({
-				key: "user-sounds",
-				value: updatedData,
-			});
+			try {
+				await this.savedSoundsAdapter.set({
+					key: "user-sounds",
+					value: updatedData,
+				});
+			} catch {
+				// Ignore adapter write failure and keep local fallback in sync.
+			}
+
+			this.saveSavedSoundsToLocalStorage({ data: updatedData });
 		} catch (error) {
 			console.error("Failed to remove saved sound:", error);
 			throw error;
@@ -569,7 +641,12 @@ class StorageService {
 
 	async clearSavedSounds(): Promise<void> {
 		try {
-			await this.savedSoundsAdapter.remove("user-sounds");
+			try {
+				await this.savedSoundsAdapter.remove("user-sounds");
+			} catch {
+				// Ignore adapter clear failure and clear fallback cache.
+			}
+			this.clearSavedSoundsFromLocalStorage();
 		} catch (error) {
 			console.error("Failed to clear saved sounds:", error);
 			throw error;

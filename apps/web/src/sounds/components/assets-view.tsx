@@ -27,6 +27,7 @@ import { useSoundSearch } from "@/sounds/use-sound-search";
 import { useSoundsStore } from "@/sounds/sounds-store";
 import type { MediaAsset } from "@/media/types";
 import type { SavedSound, SoundEffect } from "@/sounds/types";
+import type { TimelineDragData } from "@/timeline/drag";
 import { cn } from "@/utils/ui";
 import {
 	FavouriteIcon,
@@ -47,6 +48,25 @@ interface RemoteLibraryAsset {
 	size?: number;
 	duration?: number;
 	hasAudio?: boolean;
+}
+
+function stableNegativeIdFromString({
+	value,
+	fallback,
+}: {
+	value?: string;
+	fallback: string;
+}): number {
+	const input = (value && value.trim()) || fallback;
+	let hash = 2166136261;
+
+	for (let i = 0; i < input.length; i += 1) {
+		hash ^= input.charCodeAt(i);
+		hash = Math.imul(hash, 16777619);
+	}
+
+	const normalized = Math.abs(hash) % 900000000;
+	return -(normalized + 1);
 }
 
 function resolveLibraryEndpoint(): string {
@@ -185,7 +205,7 @@ function SoundEffectsView() {
 				}
 
 				const response = await fetch(
-					`${soundsApiBasePath}/sounds/search?page_size=50&sort=downloads`,
+					`${soundsApiBasePath}/sounds/search?type=effects&page=1&page_size=50&sort=downloads&commercial_only=${showCommercialOnly}`,
 				);
 
 				if (!shouldIgnore) {
@@ -225,6 +245,7 @@ function SoundEffectsView() {
 	}, [
 		hasLoaded,
 		soundsApiBasePath,
+		showCommercialOnly,
 		setTopSoundEffects,
 		setLoading,
 		setError,
@@ -259,7 +280,10 @@ function SoundEffectsView() {
 				);
 
 				const mapped = filtered.map((item, index) => ({
-					id: -100000 - index,
+					id: stableNegativeIdFromString({
+						value: item.url || item.path,
+						fallback: `${item.name}-${index}`,
+					}),
 					name: item.name,
 					description: "",
 					url: item.url,
@@ -323,7 +347,7 @@ function SoundEffectsView() {
 	const displayedSounds = searchQuery ? searchResults : topSoundEffects;
 	const projectSounds = mediaAssets
 		.filter((asset) => (asset.type === "audio" || asset.hasAudio) && !!asset.url)
-		.map((asset, index) => convertProjectMediaToSound({ asset, index }));
+		.map((asset) => convertProjectMediaToSound({ asset }));
 	const accountLibrarySounds = librarySounds.filter(
 		(sound) => !projectSounds.some((p) => p.previewUrl && p.previewUrl === sound.previewUrl),
 	);
@@ -475,13 +499,14 @@ function SoundEffectsView() {
 
 function convertProjectMediaToSound({
 	asset,
-	index,
 }: {
 	asset: MediaAsset;
-	index: number;
 }): SoundEffect {
 	return {
-		id: -(index + 1),
+		id: stableNegativeIdFromString({
+			value: asset.url || asset.id,
+			fallback: asset.id,
+		}),
 		name: asset.name,
 		description: "",
 		url: asset.url ?? "",
@@ -688,7 +713,18 @@ interface AudioItemProps {
 function AudioItem({ sound, isPlaying, onPlay }: AudioItemProps) {
 	const { addSoundToTimeline, isSoundSaved, toggleSavedSound } =
 		useSoundsStore();
+	const editor = useEditor();
 	const isSaved = isSoundSaved({ soundId: sound.id });
+	const dragData: TimelineDragData | null =
+		sound.previewUrl || sound.downloadUrl
+			? {
+					id: String(sound.id),
+					name: sound.name,
+					type: "sound",
+					sourceUrl: sound.previewUrl || sound.downloadUrl || "",
+					duration: sound.duration,
+			  }
+			: null;
 
 	const handleClick = () => {
 		onPlay({ sound });
@@ -708,8 +744,29 @@ function AudioItem({ sound, isPlaying, onPlay }: AudioItemProps) {
 		await addSoundToTimeline({ sound });
 	};
 
+	const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
+		if (!dragData) {
+			event.preventDefault();
+			return;
+		}
+
+		editor.timeline.dragSource.begin({
+			dataTransfer: event.dataTransfer,
+			dragData,
+		});
+	};
+
+	const handleDragEnd = () => {
+		editor.timeline.dragSource.end();
+	};
+
 	return (
-		<div className="group flex items-center gap-3 opacity-100 hover:opacity-75">
+		<div
+			className="group flex items-center gap-3 opacity-100 hover:opacity-75"
+			draggable={!!dragData}
+			onDragStart={handleDragStart}
+			onDragEnd={handleDragEnd}
+		>
 			<button
 				type="button"
 				className="flex min-w-0 flex-1 items-center gap-3 text-left"

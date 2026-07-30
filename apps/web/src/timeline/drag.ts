@@ -34,9 +34,16 @@ export interface EffectDragData extends BaseDragData {
 	targetElementTypes: VisualElement["type"][];
 }
 
+export interface SoundDragData extends BaseDragData {
+	type: "sound";
+	sourceUrl: string;
+	duration?: number;
+}
+
 export type TimelineDragData =
 	| MediaDragData
 	| TextDragData
 	| StickerDragData
 	| GraphicDragData
-	| EffectDragData;
+	| EffectDragData
+	| SoundDragData;

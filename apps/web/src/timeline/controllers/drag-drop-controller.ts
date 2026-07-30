@@ -13,6 +13,7 @@ import {
 	buildStickerElement,
 	buildElementFromMedia,
 	buildEffectElement,
+	buildLibraryAudioElement,
 } from "@/timeline/element-utils";
 import { AddTrackCommand, InsertElementCommand } from "@/commands/timeline";
 import { BatchCommand } from "@/commands";
@@ -98,6 +99,8 @@ function elementTypeFromDrag({
 			return "effect";
 		case "media":
 			return dragData.mediaType;
+		case "sound":
+			return "audio";
 	}
 }
 
@@ -121,6 +124,15 @@ function getDurationForDrag({
 	if (dragData.type !== "media") return DEFAULT_NEW_ELEMENT_DURATION;
 	const media = mediaAssets.find((asset) => asset.id === dragData.id);
 	return toElementDurationTicks({ seconds: media?.duration });
+}
+
+function getDurationForSoundDrag({
+	dragData,
+}: {
+	dragData: TimelineDragData;
+}): MediaTime {
+	if (dragData.type !== "sound") return DEFAULT_NEW_ELEMENT_DURATION;
+	return toElementDurationTicks({ seconds: dragData.duration });
 }
 
 function orderedTracks({
@@ -208,6 +220,7 @@ export class DragDropController {
 			dragData,
 			mediaAssets: this.config.getMediaAssets(),
 		});
+		const soundDuration = getDurationForSoundDrag({ dragData });
 		const targetElementTypes = getTargetElementTypesForDrag({ dragData });
 
 		const sceneTracks = this.config.getSceneTracks();
@@ -218,7 +231,8 @@ export class DragDropController {
 			tracks: sceneTracks,
 			playheadTime: this.config.getCurrentPlayheadTime(),
 			isExternalDrop: isExternal,
-			elementDuration: duration,
+			elementDuration:
+				dragData.type === "sound" ? soundDuration : duration,
 			pixelsPerSecond: BASE_TIMELINE_PIXELS_PER_SECOND,
 			zoomLevel: this.config.zoomLevel,
 			targetElementTypes,
@@ -374,7 +388,35 @@ export class DragDropController {
 			case "media":
 				this.executeMediaDrop({ target, dragData });
 				return;
+			case "sound":
+				this.executeSoundDrop({ target, dragData });
+				return;
 		}
+	}
+
+	private executeSoundDrop({
+		target,
+		dragData,
+	}: {
+		target: DropTarget;
+		dragData: Extract<TimelineDragData, { type: "sound" }>;
+	}): void {
+		if (!dragData.sourceUrl) {
+			return;
+		}
+
+		const duration = toElementDurationTicks({
+			seconds: dragData.duration,
+		});
+
+		const element = buildLibraryAudioElement({
+			sourceUrl: dragData.sourceUrl,
+			name: dragData.name,
+			duration,
+			startTime: target.xPosition,
+		});
+
+		this.insertAtTarget({ element, target, trackType: "audio" });
 	}
 
 	private executeTextDrop({

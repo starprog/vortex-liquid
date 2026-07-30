@@ -38,13 +38,16 @@ export function useSoundSearch({
 		try {
 			setLoadingMore({ loading: true });
 			const nextPage = currentPage + 1;
+			const isSearchMode = query.trim().length > 0;
 
 			const searchParams = new URLSearchParams({
 				page: nextPage.toString(),
 				type: "effects",
+				page_size: isSearchMode ? "20" : "50",
+				sort: "downloads",
 			});
 
-			if (query.trim()) {
+			if (isSearchMode) {
 				searchParams.set("q", query);
 			}
 
@@ -98,7 +101,7 @@ export function useSoundSearch({
 				resetPagination();
 
 				const response = await fetch(
-					`${apiBasePath}/sounds/search?q=${encodeURIComponent(query)}&type=effects&page=1`,
+					`${apiBasePath}/sounds/search?q=${encodeURIComponent(query)}&type=effects&page=1&page_size=20&sort=downloads&commercial_only=${commercialOnly}`,
 				);
 
 				if (!ignore) {
@@ -134,6 +137,7 @@ export function useSoundSearch({
 		query,
 		lastSearchQuery,
 		apiBasePath,
+		commercialOnly,
 		searchResults.length,
 		setSearchResults,
 		setSearching,
