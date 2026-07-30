@@ -82,6 +82,21 @@ interface RemoteLibraryAsset {
 	thumbnailUrl?: string;
 }
 
+function resolveLibraryEndpoint(): string {
+	if (typeof window === "undefined") {
+		return "/portal/vortex-liquid/designer/media-library";
+	}
+
+	const params = new URLSearchParams(window.location.search);
+	const mode = params.get("mode") === "admin" ? "admin" : "user";
+
+	if (mode === "admin") {
+		return "/admin/vortex-liquid/designer/media-library";
+	}
+
+	return "/portal/vortex-liquid/designer/media-library";
+}
+
 export function MediaView() {
 	const editor = useEditor();
 	const mediaFiles = useEditor((e) => e.media.getAssets());
@@ -101,16 +116,14 @@ export function MediaView() {
 	const [libraryAssets, setLibraryAssets] = useState<RemoteLibraryAsset[]>([]);
 	const [isLibraryPickerOpen, setIsLibraryPickerOpen] = useState(false);
 	const uploadInputRef = useRef<HTMLInputElement>(null);
+	const libraryEndpoint = useMemo(() => resolveLibraryEndpoint(), []);
 
 	const refreshLibrary = async () => {
 		setIsLoadingLibrary(true);
 		try {
-			const response = await fetch(
-				"/portal/vortex-liquid/designer/media-library",
-				{
-					headers: { Accept: "application/json" },
-				},
-			);
+			const response = await fetch(libraryEndpoint, {
+				headers: { Accept: "application/json" },
+			});
 
 			if (!response.ok) {
 				throw new Error(`Library request failed (${response.status})`);
@@ -134,7 +147,7 @@ export function MediaView() {
 
 	useEffect(() => {
 		void refreshLibrary();
-	}, []);
+	}, [libraryEndpoint]);
 
 	const openLibraryPicker = () => {
 		setIsLibraryPickerOpen(true);

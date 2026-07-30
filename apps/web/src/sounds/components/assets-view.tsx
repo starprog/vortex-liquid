@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -37,6 +37,33 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 
+interface RemoteLibraryAsset {
+	id: string;
+	name: string;
+	type: "image" | "video" | "audio";
+	url: string;
+	path?: string;
+	mime?: string;
+	size?: number;
+	duration?: number;
+	hasAudio?: boolean;
+}
+
+function resolveLibraryEndpoint(): string {
+	if (typeof window === "undefined") {
+		return "/portal/vortex-liquid/designer/media-library";
+	}
+
+	const params = new URLSearchParams(window.location.search);
+	const mode = params.get("mode") === "admin" ? "admin" : "user";
+
+	if (mode === "admin") {
+		return "/admin/vortex-liquid/designer/media-library";
+	}
+
+	return "/portal/vortex-liquid/designer/media-library";
+}
+
 export function SoundsView() {
 	return (
 		<div className="flex h-full flex-col">
@@ -67,6 +94,7 @@ export function SoundsView() {
 
 function SoundEffectsView() {
 	const mediaAssets = useEditor((editor) => editor.media.getAssets());
+	const libraryEndpoint = useMemo(() => resolveLibraryEndpoint(), []);
 	const {
 		topSoundEffects,
 		isLoading,
@@ -101,6 +129,7 @@ function SoundEffectsView() {
 	const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(
 		null,
 	);
+	const [librarySounds, setLibrarySounds] = useState<SoundEffect[]>([]);
 
 	const { scrollAreaRef, handleScroll } = useInfiniteScroll({
 		onLoadMore: loadMore,
@@ -176,6 +205,70 @@ function SoundEffectsView() {
 	]);
 
 	useEffect(() => {
+		let cancelled = false;
+
+		const loadLibrarySounds = async () => {
+			try {
+				const response = await fetch(libraryEndpoint, {
+					headers: { Accept: "application/json" },
+				});
+
+				if (!response.ok) {
+					return;
+				}
+
+				const payload = (await response.json()) as {
+					items?: RemoteLibraryAsset[];
+					audio?: RemoteLibraryAsset[];
+					videos?: RemoteLibraryAsset[];
+				};
+
+				const all = payload.items ?? [];
+				const filtered = all.filter(
+					(item) => item.type === "audio" || item.hasAudio || item.type === "video",
+				);
+
+				const mapped = filtered.map((item, index) => ({
+					id: -100000 - index,
+					name: item.name,
+					description: "",
+					url: item.url,
+					previewUrl: item.url,
+					downloadUrl: item.url,
+					duration: item.duration ?? 0,
+					filesize: item.size ?? 0,
+					type: item.type === "video" ? "library-video-audio" : "library-audio",
+					channels: 0,
+					bitrate: 0,
+					bitdepth: 0,
+					samplerate: 0,
+					username: "Media Library",
+					tags: ["library"],
+					license: "Account",
+					created: new Date().toISOString(),
+					downloads: 0,
+					rating: 0,
+					ratingCount: 0,
+				}));
+
+				if (!cancelled) {
+					setLibrarySounds(mapped);
+				}
+			} catch {
+				if (!cancelled) {
+					setLibrarySounds([]);
+				}
+			}
+		};
+
+		void loadLibrarySounds();
+
+		return () => {
+			cancelled = true;
+		};
+	}, [libraryEndpoint]);
+
+	useEffect(() => {
 		if (!scrollAreaRef.current || scrollPosition <= 0) {
 			return;
 		}
@@ -201,6 +294,9 @@ function SoundEffectsView() {
 	const projectSounds = mediaAssets
 		.filter((asset) => (asset.type === "audio" || asset.hasAudio) && !!asset.url)
 		.map((asset, index) => convertProjectMediaToSound({ asset, index }));
+	const accountLibrarySounds = librarySounds.filter(
+		(sound) => !projectSounds.some((p) => p.previewUrl && p.previewUrl === sound.previewUrl),
+	);
 
 	const playSound = ({ sound }: { sound: SoundEffect }) => {
 		if (playingId === sound.id) {
@@ -287,6 +383,25 @@ function SoundEffectsView() {
 								{projectSounds.map((sound) => (
 									<AudioItem
 										key={`project-${sound.id}`}
+										sound={sound}
+										isPlaying={playingId === sound.id}
+										onPlay={playSound}
+									/>
+								))}
+								<Separator />
+							</>
+						)}
+						{!searchQuery && accountLibrarySounds.length > 0 && (
+							<>
+								<div className="flex flex-col gap-1">
+									<p className="text-sm font-medium">Library sounds</p>
+									<p className="text-muted-foreground text-xs">
+										Audio and video files from your account media library.
+									</p>
+								</div>
+								{accountLibrarySounds.map((sound) => (
+									<AudioItem
+										key={`library-${sound.id}`}
 										sound={sound}
 										isPlaying={playingId === sound.id}
 										onPlay={playSound}
