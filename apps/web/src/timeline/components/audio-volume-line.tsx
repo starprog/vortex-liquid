@@ -150,6 +150,81 @@ export function AudioVolumeLine({
 		[editor, element.id, trackId],
 	);
 
+	const coerceVolumeValue = useCallback(
+		({ value }: { value: number | string | boolean }) => (typeof value === "number" ? value : null),
+		[],
+	);
+
+	// The envelope must always span the full clip, edge to edge — backfill real
+	// boundary keyframes when older/stray data doesn't already reach time 0/duration.
+	const ensureBoundaryAnchors = useCallback(
+		(
+			animations: ElementAnimations | undefined,
+			keyframes: { id: string; time: number; value: unknown }[],
+		) => {
+			if (keyframes.length === 0) {
+				return animations;
+			}
+
+			const missingStart = !keyframes.some((keyframe) => keyframe.time <= 0);
+			const missingEnd = !keyframes.some((keyframe) => keyframe.time >= element.duration);
+			if (!missingStart && !missingEnd) {
+				return animations;
+			}
+
+			const firstKeyframeValue = keyframes[0].value;
+			const lastKeyframeValue = keyframes[keyframes.length - 1].value;
+			const firstValue =
+				typeof firstKeyframeValue === "number"
+					? clampVolume({ value: firstKeyframeValue })
+					: currentVolume;
+			const lastValue =
+				typeof lastKeyframeValue === "number"
+					? clampVolume({ value: lastKeyframeValue })
+					: currentVolume;
+
+			let nextAnimations = animations;
+			if (missingStart) {
+				nextAnimations = upsertPathKeyframe({
+					animations: nextAnimations,
+					propertyPath: "volume",
+					time: 0,
+					value: firstValue,
+					channelLayout: NUMBER_CHANNEL_LAYOUT,
+					coerceValue: coerceVolumeValue,
+				});
+			}
+			if (missingEnd) {
+				nextAnimations = upsertPathKeyframe({
+					animations: nextAnimations,
+					propertyPath: "volume",
+					time: element.duration,
+					value: lastValue,
+					channelLayout: NUMBER_CHANNEL_LAYOUT,
+					coerceValue: coerceVolumeValue,
+				});
+			}
+			return nextAnimations;
+		},
+		[coerceVolumeValue, currentVolume, element.duration],
+	);
+
+	const hasNormalizedBoundariesRef = useRef(false);
+	useEffect(() => {
+		if (hasNormalizedBoundariesRef.current || volumeKeyframes.length === 0) {
+			return;
+		}
+
+		hasNormalizedBoundariesRef.current = true;
+		const nextAnimations = ensureBoundaryAnchors(element.animations, volumeKeyframes);
+		if (nextAnimations !== element.animations) {
+			commitAnimations(nextAnimations);
+		}
+		// Runs once on mount to heal legacy keyframe data; re-running on every
+		// volumeKeyframes change would fight with the commit this effect itself causes.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
+
 	// Uniform (non-keyframed) volume drag on a flat line — never creates a keyframe.
 	const previewVolume = useCallback(
 		(nextVolume: number) => {
@@ -416,8 +491,6 @@ export function AudioVolumeLine({
 				max: element.duration,
 			});
 			const clickValue = getVolumeFromPointer({ clientY: event.clientY, rect });
-			const coerceVolume = ({ value }: { value: number | string | boolean }) =>
-				typeof value === "number" ? value : null;
 
 			if (volumeKeyframes.length === 0) {
 				const { start, interior, end } = buildInitialKeyframeSet({
@@ -432,7 +505,7 @@ export function AudioVolumeLine({
 					time: start.time,
 					value: start.value,
 					channelLayout: NUMBER_CHANNEL_LAYOUT,
-					coerceValue: coerceVolume,
+					coerceValue: coerceVolumeValue,
 				});
 				nextAnimations = upsertPathKeyframe({
 					animations: nextAnimations,
@@ -440,7 +513,7 @@ export function AudioVolumeLine({
 					time: interior.time,
 					value: interior.value,
 					channelLayout: NUMBER_CHANNEL_LAYOUT,
-					coerceValue: coerceVolume,
+					coerceValue: coerceVolumeValue,
 				});
 				nextAnimations = upsertPathKeyframe({
 					animations: nextAnimations,
@@ -448,17 +521,19 @@ export function AudioVolumeLine({
 					time: end.time,
 					value: end.value,
 					channelLayout: NUMBER_CHANNEL_LAYOUT,
-					coerceValue: coerceVolume,
+					coerceValue: coerceVolumeValue,
 				});
 				commitAnimations(nextAnimations);
 				return;
 			}
 
+			const anchoredAnimations = ensureBoundaryAnchors(resolvedAnimations, volumeKeyframes);
+			const anchoredKeyframes = getElementKeyframes({ animations: anchoredAnimations })
+				.filter((keyframe) => keyframe.propertyPath === "volume")
+				.map((keyframe) => ({ id: keyframe.id, time: keyframe.time }));
+
 			const pendingId = "__pending-keyframe__";
-			const withPending = [
-				...volumeKeyframes.map((keyframe) => ({ id: keyframe.id, time: keyframe.time })),
-				{ id: pendingId, time: clickTime },
-			];
+			const withPending = [...anchoredKeyframes, { id: pendingId, time: clickTime }];
 			const constrained = constrainKeyframeDrag({
 				keyframes: withPending,
 				keyframeId: pendingId,
@@ -469,21 +544,23 @@ export function AudioVolumeLine({
 				valueMax: VOLUME_DB_MAX,
 			});
 			const nextAnimations = upsertPathKeyframe({
-				animations: resolvedAnimations,
+				animations: anchoredAnimations,
 				propertyPath: "volume",
 				time: constrained.time,
 				value: constrained.value,
 				channelLayout: NUMBER_CHANNEL_LAYOUT,
-				coerceValue: coerceVolume,
+				coerceValue: coerceVolumeValue,
 			});
 			commitAnimations(nextAnimations);
 		},
 		[
+			coerceVolumeValue,
 			commitAnimations,
 			currentVolume,
 			editor.selection,
 			element.duration,
 			element.id,
+			ensureBoundaryAnchors,
 			resolvedAnimations,
 			trackId,
 			volumeKeyframes,
@@ -523,6 +600,7 @@ export function AudioVolumeLine({
 					? clampVolume({ value: keyframe.value })
 					: currentVolume;
 			const localTime = keyframe.time;
+			activePointerIdRef.current = event.pointerId;
 			startDrag({
 				pointerId: event.pointerId,
 				mode: "existing",
