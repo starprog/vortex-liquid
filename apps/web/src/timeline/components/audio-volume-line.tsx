@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { getElementKeyframes, upsertPathKeyframe } from "@/animation";
+import { getElementKeyframes, removeElementKeyframe, upsertPathKeyframe } from "@/animation";
 import { useEditor } from "@/editor/use-editor";
 import {
 	getDbFromLinePos,
@@ -10,13 +10,16 @@ import {
 } from "@/timeline/audio-display";
 import { VOLUME_DB_MAX, VOLUME_DB_MIN } from "@/timeline/audio-constants";
 import {
-	buildAudioGainAutomation,
 	getElementVolume,
 	hasAnimatedVolume,
 } from "@/timeline/audio-state";
+import {
+	buildInitialKeyframeSet,
+	classifyKeyframeRole,
+	constrainKeyframeDrag,
+} from "./audio-volume-keyframe-constraints";
 import type { AudioElement } from "@/timeline/types";
 import type { ElementAnimations } from "@/animation/types";
-import { TICKS_PER_SECOND } from "@/wasm";
 import { NUMBER_CHANNEL_LAYOUT } from "@/params";
 import {
 	clamp,
@@ -32,8 +35,8 @@ const HIT_AREA_HEIGHT_PX = 14;
 const TOOLTIP_OFFSET_PX = 10;
 const VOLUME_STEP = 0.1;
 const VOLUME_FRACTION_DIGITS = getFractionDigitsForStep({ step: VOLUME_STEP });
-const AUTOMATION_MIN_POINTS = 48;
-const AUTOMATION_MAX_POINTS = 120;
+// Below this count, both remaining keyframes are boundary anchors and neither can be deleted.
+const MIN_KEYFRAMES_BEFORE_BOUNDARY_DELETE = 3;
 
 type DragStartSnapshot = {
 	animations: ElementAnimations | undefined;
@@ -41,7 +44,7 @@ type DragStartSnapshot = {
 
 type ActiveVolumeDrag = {
 	pointerId: number;
-	mode: "existing" | "new";
+	mode: "existing" | "uniform";
 	keyframeId: string | null;
 	localTime: number;
 	startValue: number;
@@ -70,14 +73,6 @@ function getVolumeFromPointer({
 	const progressPercent =
 		rect.height <= 0 ? 0 : (clampedOffset / rect.height) * 100;
 	return clampVolume({ value: getDbFromLinePos({ percent: progressPercent }) });
-}
-
-function getDbFromGain({ gain }: { gain: number }): number {
-	if (!Number.isFinite(gain) || gain <= 0) {
-		return VOLUME_DB_MIN;
-	}
-
-	return clampVolume({ value: 20 * Math.log10(gain) });
 }
 
 export function AudioVolumeLine({
@@ -118,52 +113,11 @@ export function AudioVolumeLine({
 			.filter((keyframe) => keyframe.propertyPath === "volume")
 			.sort((left, right) => left.time - right.time);
 	}, [resolvedAnimations]);
-	const automationPolylinePoints = useMemo(() => {
-		if (!hasAnimatedEnvelope) {
-			return "";
-		}
-
-		const durationSeconds = Math.max(0, element.duration / TICKS_PER_SECOND);
-		if (durationSeconds <= 0) {
-			return "";
-		}
-
-		const sampleCount = clamp({
-			value: Math.round(durationSeconds * 24),
-			min: AUTOMATION_MIN_POINTS,
-			max: AUTOMATION_MAX_POINTS,
-		});
-		const stepSeconds = durationSeconds / sampleCount;
-		const points = buildAudioGainAutomation({
-			element: previewElement,
-			fromLocalTime: 0,
-			toLocalTime: durationSeconds,
-			stepSeconds,
-		});
-
-		if (points.length === 0) {
-			return "";
-		}
-
-		return points
-			.map(({ localTime, gain }) => {
-				const x = (localTime / durationSeconds) * 100;
-				const y = getLinePosFromDb({ db: getDbFromGain({ gain }) });
-				return `${x},${y}`;
-			})
-			.join(" ");
-	}, [element.duration, hasAnimatedEnvelope, previewElement]);
-
-	const visibleEnvelopePoints = useMemo(() => {
+	// Straight keyframe-to-keyframe segments, matching Adobe Premiere Pro's clip volume rubber band.
+	const envelopePoints = useMemo(() => {
 		const duration = Math.max(1, element.duration);
-		const baselinePoint = `${0},${getLinePosFromDb({ db: currentVolume })}`;
-		if (volumeKeyframes.length === 0) {
-			return baselinePoint;
-		}
-
-		return [
-			baselinePoint,
-			...volumeKeyframes.map((keyframe) => {
+		return volumeKeyframes
+			.map((keyframe) => {
 				const value =
 					typeof keyframe.value === "number"
 						? clampVolume({ value: keyframe.value })
@@ -171,8 +125,8 @@ export function AudioVolumeLine({
 				const x = (keyframe.time / duration) * 100;
 				const y = getLinePosFromDb({ db: value });
 				return `${x},${y}`;
-			}),
-		].join(" ");
+			})
+			.join(" ");
 	}, [currentVolume, element.duration, volumeKeyframes]);
 
 	const volumeLabel = `${formatNumberForDisplay({
@@ -180,6 +134,23 @@ export function AudioVolumeLine({
 		fractionDigits: VOLUME_FRACTION_DIGITS,
 	})} dB`;
 
+	const commitAnimations = useCallback(
+		(nextAnimations: ElementAnimations | undefined) => {
+			editor.timeline.previewElements({
+				updates: [
+					{
+						trackId,
+						elementId: element.id,
+						updates: { animations: nextAnimations },
+					},
+				],
+			});
+			editor.timeline.commitPreview();
+		},
+		[editor, element.id, trackId],
+	);
+
+	// Uniform (non-keyframed) volume drag on a flat line — never creates a keyframe.
 	const previewVolume = useCallback(
 		(nextVolume: number) => {
 			if (
@@ -197,24 +168,6 @@ export function AudioVolumeLine({
 				return;
 			}
 
-			const targetTime = activeDrag.localTime;
-			const nextAnimations = upsertPathKeyframe({
-				animations: resolvedAnimations,
-				propertyPath: "volume",
-				time: targetTime,
-				value: nextVolume,
-				keyframeId:
-					activeDrag.mode === "existing" ? activeDrag.keyframeId ?? undefined : undefined,
-				interpolation:
-					activeDrag.mode === "existing"
-						? volumeKeyframes.find((keyframe) => keyframe.id === activeDrag.keyframeId)
-								?.interpolation ?? "linear"
-						: "linear",
-				channelLayout: NUMBER_CHANNEL_LAYOUT,
-				coerceValue: ({ value }) => (typeof value === "number" ? value : null),
-			});
-
-			setPreviewAnimations(nextAnimations);
 			setDisplayVolume(nextVolume);
 			hasPreviewedRef.current = true;
 			editor.timeline.previewElements({
@@ -223,7 +176,7 @@ export function AudioVolumeLine({
 						trackId,
 						elementId: element.id,
 						updates: {
-							animations: nextAnimations,
+							params: { ...element.params, volume: nextVolume },
 						},
 					},
 				],
@@ -234,7 +187,68 @@ export function AudioVolumeLine({
 				rightValue: nextVolume,
 			});
 		},
-		[editor, element.id, resolvedAnimations, trackId, volumeKeyframes],
+		[editor, element.id, element.params, trackId],
+	);
+
+	// Existing keyframe drag — time is ignored for boundary keyframes, constrained for interior ones.
+	const previewKeyframe = useCallback(
+		({ time, value }: { time: number; value: number }) => {
+			if (
+				!shouldApplyVolumePreview({
+					hasPreviewed: hasChangedRef.current,
+					nextVolume: value,
+					lastPreviewVolume: lastPreviewVolumeRef.current,
+				})
+			) {
+				return;
+			}
+
+			const activeDrag = activeDragRef.current;
+			if (!activeDrag || activeDrag.mode !== "existing" || !activeDrag.keyframeId) {
+				return;
+			}
+
+			const constrained = constrainKeyframeDrag({
+				keyframes: volumeKeyframes,
+				keyframeId: activeDrag.keyframeId,
+				duration: element.duration,
+				proposedTime: time,
+				proposedValue: value,
+				valueMin: VOLUME_DB_MIN,
+				valueMax: VOLUME_DB_MAX,
+			});
+			const nextAnimations = upsertPathKeyframe({
+				animations: resolvedAnimations,
+				propertyPath: "volume",
+				time: constrained.time,
+				value: constrained.value,
+				keyframeId: activeDrag.keyframeId,
+				interpolation:
+					volumeKeyframes.find((keyframe) => keyframe.id === activeDrag.keyframeId)
+						?.interpolation ?? "linear",
+				channelLayout: NUMBER_CHANNEL_LAYOUT,
+				coerceValue: ({ value: coerced }) => (typeof coerced === "number" ? coerced : null),
+			});
+
+			setPreviewAnimations(nextAnimations);
+			setDisplayVolume(constrained.value);
+			hasPreviewedRef.current = true;
+			editor.timeline.previewElements({
+				updates: [
+					{
+						trackId,
+						elementId: element.id,
+						updates: { animations: nextAnimations },
+					},
+				],
+			});
+			lastPreviewVolumeRef.current = constrained.value;
+			hasChangedRef.current = !isNearlyEqual({
+				leftValue: activeDrag.startValue,
+				rightValue: constrained.value,
+			});
+		},
+		[editor, element.duration, element.id, resolvedAnimations, trackId, volumeKeyframes],
 	);
 
 	const finishDrag = useCallback(
@@ -261,7 +275,8 @@ export function AudioVolumeLine({
 	const updateFromPointer = useCallback(
 		({ clientX, clientY }: { clientX: number; clientY: number }) => {
 			const rect = surfaceRef.current?.getBoundingClientRect();
-			if (!rect) {
+			const activeDrag = activeDragRef.current;
+			if (!rect || !activeDrag) {
 				return;
 			}
 
@@ -270,15 +285,32 @@ export function AudioVolumeLine({
 				x: clientX + TOOLTIP_OFFSET_PX,
 				y: clientY - TOOLTIP_OFFSET_PX,
 			});
-			previewVolume(nextVolume);
+
+			if (activeDrag.mode === "uniform") {
+				previewVolume(nextVolume);
+				return;
+			}
+
+			const proposedTime = clamp({
+				value: Math.round(((clientX - rect.left) / Math.max(rect.width, 1)) * element.duration),
+				min: 0,
+				max: element.duration,
+			});
+			previewKeyframe({ time: proposedTime, value: nextVolume });
 		},
-		[previewVolume],
+		[element.duration, previewKeyframe, previewVolume],
 	);
 
-	const handleClick = useCallback((event: React.MouseEvent) => {
-		event.preventDefault();
-		event.stopPropagation();
-	}, []);
+	const handleClick = useCallback(
+		(event: React.MouseEvent) => {
+			event.preventDefault();
+			event.stopPropagation();
+			editor.selection.setSelectedElements({
+				elements: [{ trackId, elementId: element.id }],
+			});
+		},
+		[editor.selection, element.id, trackId],
+	);
 
 	const handleKeyDown = useCallback(
 		(event: React.KeyboardEvent) => {
@@ -334,7 +366,8 @@ export function AudioVolumeLine({
 		[resolvedAnimations],
 	);
 
-	const handlePointerDown = useCallback(
+	// Flat-line (no keyframes) drag — adjusts uniform clip volume only, never creates a keyframe.
+	const handleFlatLinePointerDown = useCallback(
 		(event: React.PointerEvent<HTMLDivElement>) => {
 			if (event.button !== 0) {
 				return;
@@ -347,19 +380,12 @@ export function AudioVolumeLine({
 			});
 			activePointerIdRef.current = event.pointerId;
 			const rect = surfaceRef.current?.getBoundingClientRect();
-			const localTime = rect
-				? clamp({
-						value: Math.round(((event.clientX - rect.left) / Math.max(rect.width, 1)) * element.duration),
-						min: 0,
-						max: element.duration,
-					})
-				: 0;
 			const startValue = getVolumeFromPointer({ clientY: event.clientY, rect: rect ?? new DOMRect() });
 			startDrag({
 				pointerId: event.pointerId,
-				mode: "new",
+				mode: "uniform",
 				keyframeId: null,
-				localTime,
+				localTime: 0,
 				startValue,
 			});
 			event.currentTarget.setPointerCapture(event.pointerId);
@@ -368,7 +394,100 @@ export function AudioVolumeLine({
 				clientY: event.clientY,
 			});
 		},
-		[editor.selection, element.duration, element.id, startDrag, trackId, updateFromPointer],
+		[editor.selection, element.id, startDrag, trackId, updateFromPointer],
+	);
+
+	// Double-click adds a keyframe: the first add anchors both clip start/end plus the clicked point.
+	const handleEnvelopeDoubleClick = useCallback(
+		(event: React.MouseEvent<HTMLDivElement>) => {
+			event.preventDefault();
+			event.stopPropagation();
+			const rect = surfaceRef.current?.getBoundingClientRect();
+			if (!rect) {
+				return;
+			}
+
+			editor.selection.setSelectedElements({
+				elements: [{ trackId, elementId: element.id }],
+			});
+			const clickTime = clamp({
+				value: Math.round(((event.clientX - rect.left) / Math.max(rect.width, 1)) * element.duration),
+				min: 0,
+				max: element.duration,
+			});
+			const clickValue = getVolumeFromPointer({ clientY: event.clientY, rect });
+			const coerceVolume = ({ value }: { value: number | string | boolean }) =>
+				typeof value === "number" ? value : null;
+
+			if (volumeKeyframes.length === 0) {
+				const { start, interior, end } = buildInitialKeyframeSet({
+					clickTime,
+					clickValue,
+					duration: element.duration,
+					currentVolume,
+				});
+				let nextAnimations = upsertPathKeyframe({
+					animations: resolvedAnimations,
+					propertyPath: "volume",
+					time: start.time,
+					value: start.value,
+					channelLayout: NUMBER_CHANNEL_LAYOUT,
+					coerceValue: coerceVolume,
+				});
+				nextAnimations = upsertPathKeyframe({
+					animations: nextAnimations,
+					propertyPath: "volume",
+					time: interior.time,
+					value: interior.value,
+					channelLayout: NUMBER_CHANNEL_LAYOUT,
+					coerceValue: coerceVolume,
+				});
+				nextAnimations = upsertPathKeyframe({
+					animations: nextAnimations,
+					propertyPath: "volume",
+					time: end.time,
+					value: end.value,
+					channelLayout: NUMBER_CHANNEL_LAYOUT,
+					coerceValue: coerceVolume,
+				});
+				commitAnimations(nextAnimations);
+				return;
+			}
+
+			const pendingId = "__pending-keyframe__";
+			const withPending = [
+				...volumeKeyframes.map((keyframe) => ({ id: keyframe.id, time: keyframe.time })),
+				{ id: pendingId, time: clickTime },
+			];
+			const constrained = constrainKeyframeDrag({
+				keyframes: withPending,
+				keyframeId: pendingId,
+				duration: element.duration,
+				proposedTime: clickTime,
+				proposedValue: clickValue,
+				valueMin: VOLUME_DB_MIN,
+				valueMax: VOLUME_DB_MAX,
+			});
+			const nextAnimations = upsertPathKeyframe({
+				animations: resolvedAnimations,
+				propertyPath: "volume",
+				time: constrained.time,
+				value: constrained.value,
+				channelLayout: NUMBER_CHANNEL_LAYOUT,
+				coerceValue: coerceVolume,
+			});
+			commitAnimations(nextAnimations);
+		},
+		[
+			commitAnimations,
+			currentVolume,
+			editor.selection,
+			element.duration,
+			element.id,
+			resolvedAnimations,
+			trackId,
+			volumeKeyframes,
+		],
 	);
 
 	const handlePointerMove = useCallback(
@@ -418,6 +537,28 @@ export function AudioVolumeLine({
 			});
 		},
 		[currentVolume, startDrag, updateFromPointer, volumeKeyframes],
+	);
+
+	// Right-click removes an interior keyframe; boundary anchors are protected once 3+ keyframes exist.
+	const handleKeyframeContextMenu = useCallback(
+		(event: React.MouseEvent<HTMLButtonElement>, keyframeId: string) => {
+			event.preventDefault();
+			event.stopPropagation();
+
+			const role = classifyKeyframeRole({ keyframes: volumeKeyframes, keyframeId });
+			const isBoundary = role === "boundary-start" || role === "boundary-end";
+			if (isBoundary && volumeKeyframes.length >= MIN_KEYFRAMES_BEFORE_BOUNDARY_DELETE) {
+				return;
+			}
+
+			const nextAnimations = removeElementKeyframe({
+				animations: resolvedAnimations,
+				propertyPath: "volume",
+				keyframeId,
+			});
+			commitAnimations(nextAnimations);
+		},
+		[commitAnimations, resolvedAnimations, volumeKeyframes],
 	);
 
 	const handlePointerUp = useCallback(
@@ -502,12 +643,13 @@ export function AudioVolumeLine({
 					preserveAspectRatio="none"
 				>
 					<polyline
-						points={automationPolylinePoints || visibleEnvelopePoints}
+						points={envelopePoints}
 						fill="none"
 						stroke="rgba(255,255,255,0.82)"
-						strokeWidth="0.55"
+						strokeWidth="1.5"
 						strokeLinecap="round"
 						strokeLinejoin="round"
+						vectorEffect="non-scaling-stroke"
 					/>
 				</svg>
 				{volumeKeyframes.map((keyframe) => {
@@ -517,14 +659,23 @@ export function AudioVolumeLine({
 							: currentVolume;
 					const left = `${(keyframe.time / Math.max(element.duration, 1)) * 100}%`;
 					const top = `${getLinePosFromDb({ db: value })}%`;
+					const role = classifyKeyframeRole({ keyframes: volumeKeyframes, keyframeId: keyframe.id });
 					return (
 						<button
 							type="button"
 							key={keyframe.id}
-							className="pointer-events-auto absolute z-10 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/90 bg-foreground shadow-sm"
+							className={cn(
+								"pointer-events-auto absolute z-10 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/90 bg-foreground shadow-sm",
+								role === "interior" ? "cursor-move" : "cursor-ns-resize",
+							)}
 							style={{ left, top }}
 							onPointerDown={(event) => handleKeyframePointerDown(event, keyframe.id)}
-							title="Drag to adjust volume keyframe"
+							onContextMenu={(event) => handleKeyframeContextMenu(event, keyframe.id)}
+							title={
+								role === "interior"
+									? "Drag to adjust volume keyframe · right-click to remove"
+									: "Drag to adjust volume"
+							}
 						/>
 					);
 				})}
@@ -538,14 +689,14 @@ export function AudioVolumeLine({
 						aria-valuenow={currentVolume}
 						tabIndex={0}
 						onClick={handleClick}
+						onDoubleClick={handleEnvelopeDoubleClick}
 						onKeyDown={handleKeyDown}
 						onMouseDown={handleMouseDown}
-						onPointerDown={handlePointerDown}
 						onPointerMove={handlePointerMove}
 						onPointerUp={handlePointerUp}
 						onPointerCancel={handlePointerCancel}
 						onLostPointerCapture={handleLostPointerCapture}
-						title="Drag to adjust clip volume"
+						title="Double-click to add a volume keyframe"
 					/>
 				</div>
 				{isDragging &&
@@ -587,14 +738,15 @@ export function AudioVolumeLine({
 					aria-valuenow={currentVolume}
 					tabIndex={0}
 					onClick={handleClick}
+					onDoubleClick={handleEnvelopeDoubleClick}
 					onKeyDown={handleKeyDown}
 					onMouseDown={handleMouseDown}
-					onPointerDown={handlePointerDown}
+					onPointerDown={handleFlatLinePointerDown}
 					onPointerMove={handlePointerMove}
 					onPointerUp={handlePointerUp}
 					onPointerCancel={handlePointerCancel}
 					onLostPointerCapture={handleLostPointerCapture}
-					title="Drag to adjust clip volume"
+					title="Drag to adjust clip volume · double-click to add a keyframe"
 				/>
 				{isDragging &&
 					tooltipClientPos &&
