@@ -5,6 +5,7 @@ import { PanelView } from "@/components/editor/panels/assets/views/base-panel";
 import { useEditor } from "@/editor/use-editor";
 import { isVisualElement } from "@/timeline/element-utils";
 import { mediaTime, mediaTimeFromSeconds, ZERO_MEDIA_TIME, type MediaTime } from "@/wasm";
+import { toast } from "sonner";
 
 interface TransitionPreset {
 	id:
@@ -87,38 +88,39 @@ export function TransitionsView() {
 
 	const applyPreset = useCallback(
 		(preset: TransitionPreset) => {
-			if (!selectedVisual) {
-				return;
-			}
+			try {
+				if (!selectedVisual) {
+					return;
+				}
 
-			const { track, element } = selectedVisual;
-			if (!isVisualElement(element)) {
-				return;
-			}
+				const { track, element } = selectedVisual;
+				if (!isVisualElement(element)) {
+					return;
+				}
 
-			if (preset.id === "dreamy-blur" || preset.id === "motion-blur-horizontal") {
-				editor.timeline.addClipEffect({
-					trackId: track.id,
-					elementId: element.id,
-					effectType:
-						preset.id === "dreamy-blur"
-							? "dreamy-blur"
-							: "motion-blur-horizontal",
+				if (preset.id === "dreamy-blur" || preset.id === "motion-blur-horizontal") {
+					editor.timeline.addClipEffect({
+						trackId: track.id,
+						elementId: element.id,
+						effectType:
+							preset.id === "dreamy-blur"
+								? "dreamy-blur"
+								: "motion-blur-horizontal",
+					});
+					return;
+				}
+
+				const transitionDuration = getTransitionDuration({
+					elementDuration: element.duration,
 				});
-				return;
-			}
+				const elementEnd = mediaTime({
+					ticks: Math.max(1, element.duration - 1),
+				});
+				const fadeOutStart = mediaTime({
+					ticks: Math.max(0, elementEnd - transitionDuration),
+				});
 
-			const transitionDuration = getTransitionDuration({
-				elementDuration: element.duration,
-			});
-			const elementEnd = mediaTime({
-				ticks: Math.max(1, element.duration - 1),
-			});
-			const fadeOutStart = mediaTime({
-				ticks: Math.max(0, elementEnd - transitionDuration),
-			});
-
-			if (preset.id === "fade-in") {
+				if (preset.id === "fade-in") {
 				editor.timeline.upsertKeyframes({
 					keyframes: [
 						{
@@ -139,10 +141,10 @@ export function TransitionsView() {
 						},
 					],
 				});
-				return;
-			}
+					return;
+				}
 
-			if (preset.id === "fade-out") {
+				if (preset.id === "fade-out") {
 				editor.timeline.upsertKeyframes({
 					keyframes: [
 						{
@@ -163,10 +165,10 @@ export function TransitionsView() {
 						},
 					],
 				});
-				return;
-			}
+					return;
+				}
 
-			if (preset.id === "slide-up-in") {
+				if (preset.id === "slide-up-in") {
 				const baseOpacity = readNumericParam({
 					element,
 					key: "opacity",
@@ -213,10 +215,10 @@ export function TransitionsView() {
 						},
 					],
 				});
-				return;
-			}
+					return;
+				}
 
-			if (preset.id === "zoom-pulse") {
+				if (preset.id === "zoom-pulse") {
 				const baseScaleX = readNumericParam({
 					element,
 					key: "transform.scaleX",
@@ -283,10 +285,10 @@ export function TransitionsView() {
 						},
 					],
 				});
-				return;
-			}
+					return;
+				}
 
-			editor.timeline.upsertKeyframes({
+				editor.timeline.upsertKeyframes({
 				keyframes: [
 					{
 						trackId: track.id,
@@ -321,7 +323,11 @@ export function TransitionsView() {
 						interpolation: "linear",
 					},
 				],
-			});
+				});
+			} catch (error) {
+				console.error("Failed to apply transition preset:", error);
+				toast.error("Could not apply transition. Try selecting a different layer.");
+			}
 		},
 		[editor, selectedVisual],
 	);

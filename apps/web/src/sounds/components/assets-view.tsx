@@ -671,10 +671,8 @@ function SavedSoundsView() {
 							</Button>
 							<Button
 								variant="destructive"
-								onClick={async ({
-									stopPropagation,
-								}: React.MouseEvent<HTMLButtonElement>) => {
-									stopPropagation();
+								onClick={async (event: React.MouseEvent<HTMLButtonElement>) => {
+									event.stopPropagation();
 									await clearSavedSounds();
 									setShowClearDialog(false);
 								}}
@@ -730,17 +728,15 @@ function AudioItem({ sound, isPlaying, onPlay }: AudioItemProps) {
 		onPlay({ sound });
 	};
 
-	const handleSaveClick = ({
-		stopPropagation,
-	}: React.MouseEvent<HTMLButtonElement>) => {
-		stopPropagation();
+	const handleSaveClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+		event.stopPropagation();
 		toggleSavedSound({ soundEffect: sound });
 	};
 
-	const handleAddToTimeline = async ({
-		stopPropagation,
-	}: React.MouseEvent<HTMLButtonElement>) => {
-		stopPropagation();
+	const handleAddToTimeline = async (
+		event: React.MouseEvent<HTMLButtonElement>,
+	) => {
+		event.stopPropagation();
 		await addSoundToTimeline({ sound });
 	};
 

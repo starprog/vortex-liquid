@@ -61,11 +61,15 @@ function buildTrackNodes({
 
 			if (element.type === "video" || element.type === "image") {
 				const mediaAsset = mediaMap.get(element.mediaId);
-				if (!mediaAsset?.file || !mediaAsset?.url) {
+				if (!mediaAsset?.url) {
 					continue;
 				}
 
-				if (element.type === "video" && mediaAsset.type === "video") {
+				if (
+					element.type === "video" &&
+					mediaAsset.type === "video" &&
+					mediaAsset.file
+				) {
 					nodes.push(
 						new VideoNode({
 							mediaId: mediaAsset.id,
@@ -187,11 +191,11 @@ function buildBlurBackgroundNodes({
 		}
 
 		const mediaAsset = mediaMap.get(element.mediaId);
-		if (
-			!mediaAsset?.file ||
-			!mediaAsset?.url ||
-			(mediaAsset.type !== "video" && mediaAsset.type !== "image")
-		) {
+		if (!mediaAsset?.url || (mediaAsset.type !== "video" && mediaAsset.type !== "image")) {
+			continue;
+		}
+
+		if (mediaAsset.type === "video" && !mediaAsset.file) {
 			continue;
 		}
 

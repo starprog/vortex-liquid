@@ -60,14 +60,14 @@ export function useSoundSearch({
 				const data = await response.json();
 
 				if (query.trim()) {
-					appendSearchResults(data.results);
+					appendSearchResults({ results: data.results });
 				} else {
-					appendTopSounds(data.results);
+					appendTopSounds({ results: data.results });
 				}
 
 				setCurrentPage({ page: nextPage });
 				setHasNextPage({ hasNext: !!data.next });
-				setTotalCount(data.count);
+				setTotalCount({ count: data.count });
 			} else {
 				setSearchError({ error: `Load more failed: ${response.status}` });
 			}

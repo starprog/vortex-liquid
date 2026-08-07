@@ -36,8 +36,8 @@ const defaultTextElement: Omit<TextElement, "id"> = {
 	trimStart: ZERO_MEDIA_TIME,
 	trimEnd: ZERO_MEDIA_TIME,
 	params: {
-		content: "Default text",
-		fontSize: 15,
+		content: "Text",
+		fontSize: 12,
 		fontFamily: "Arial",
 		color: "#ffffff",
 		textAlign: "center",

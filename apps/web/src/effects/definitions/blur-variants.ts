@@ -48,7 +48,7 @@ export const dreamyBlurEffectDefinition: EffectDefinition = {
 			key: "intensity",
 			label: "Intensity",
 			type: "number",
-			default: 24,
+			default: 12,
 			min: 0,
 			max: 120,
 			step: 1,
@@ -61,7 +61,7 @@ export const dreamyBlurEffectDefinition: EffectDefinition = {
 				uniforms: ({ effectParams, width }) => ({
 					u_sigma: Math.max(
 						intensityToSigma({
-							intensity: parseIntensity(effectParams, 24),
+							intensity: parseIntensity(effectParams, 12),
 							resolution: width,
 							reference: 1920,
 						}),
@@ -76,7 +76,7 @@ export const dreamyBlurEffectDefinition: EffectDefinition = {
 				uniforms: ({ effectParams, height }) => ({
 					u_sigma: Math.max(
 						intensityToSigma({
-							intensity: parseIntensity(effectParams, 24),
+							intensity: parseIntensity(effectParams, 12),
 							resolution: height,
 							reference: 1080,
 						}),
@@ -88,7 +88,7 @@ export const dreamyBlurEffectDefinition: EffectDefinition = {
 			},
 		],
 		buildPasses: ({ effectParams, width, height }) => {
-			const intensity = parseIntensity(effectParams, 24);
+			const intensity = parseIntensity(effectParams, 12);
 			return buildGaussianBlurPasses({
 				sigmaX: intensityToSigma({ intensity, resolution: width, reference: 1920 }),
 				sigmaY: intensityToSigma({ intensity, resolution: height, reference: 1080 }),
@@ -106,7 +106,7 @@ export const motionBlurHorizontalEffectDefinition: EffectDefinition = {
 			key: "intensity",
 			label: "Intensity",
 			type: "number",
-			default: 32,
+			default: 16,
 			min: 0,
 			max: 150,
 			step: 1,
@@ -119,7 +119,7 @@ export const motionBlurHorizontalEffectDefinition: EffectDefinition = {
 				uniforms: ({ effectParams, width }) => ({
 					u_sigma: Math.max(
 						intensityToSigma({
-							intensity: parseIntensity(effectParams, 32),
+							intensity: parseIntensity(effectParams, 16),
 							resolution: width,
 							reference: 1920,
 						}),
@@ -131,7 +131,7 @@ export const motionBlurHorizontalEffectDefinition: EffectDefinition = {
 			},
 		],
 		buildPasses: ({ effectParams, width }) => {
-			const intensity = parseIntensity(effectParams, 32);
+			const intensity = parseIntensity(effectParams, 16);
 			const sigma = intensityToSigma({
 				intensity,
 				resolution: width,
@@ -151,7 +151,7 @@ export const motionBlurVerticalEffectDefinition: EffectDefinition = {
 			key: "intensity",
 			label: "Intensity",
 			type: "number",
-			default: 32,
+			default: 16,
 			min: 0,
 			max: 150,
 			step: 1,
@@ -164,7 +164,7 @@ export const motionBlurVerticalEffectDefinition: EffectDefinition = {
 				uniforms: ({ effectParams, height }) => ({
 					u_sigma: Math.max(
 						intensityToSigma({
-							intensity: parseIntensity(effectParams, 32),
+							intensity: parseIntensity(effectParams, 16),
 							resolution: height,
 							reference: 1080,
 						}),
@@ -176,7 +176,7 @@ export const motionBlurVerticalEffectDefinition: EffectDefinition = {
 			},
 		],
 		buildPasses: ({ effectParams, height }) => {
-			const intensity = parseIntensity(effectParams, 32);
+			const intensity = parseIntensity(effectParams, 16);
 			const sigma = intensityToSigma({
 				intensity,
 				resolution: height,

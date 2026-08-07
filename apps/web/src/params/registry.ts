@@ -97,6 +97,7 @@ const visualElementParams: ElementParamDefinition[] = [
 	{
 		key: "transform.positionX",
 		label: "Position X",
+		shortLabel: "X",
 		type: "number",
 		default: DEFAULTS.element.transform.position.x,
 		min: -100_000,
@@ -105,6 +106,7 @@ const visualElementParams: ElementParamDefinition[] = [
 	{
 		key: "transform.positionY",
 		label: "Position Y",
+		shortLabel: "Y",
 		type: "number",
 		default: DEFAULTS.element.transform.position.y,
 		min: -100_000,
@@ -113,6 +115,7 @@ const visualElementParams: ElementParamDefinition[] = [
 	{
 		key: "transform.scaleX",
 		label: "Scale X",
+		shortLabel: "SX",
 		type: "number",
 		default: DEFAULTS.element.transform.scaleX,
 		min: MIN_TRANSFORM_SCALE,
@@ -121,6 +124,7 @@ const visualElementParams: ElementParamDefinition[] = [
 	{
 		key: "transform.scaleY",
 		label: "Scale Y",
+		shortLabel: "SY",
 		type: "number",
 		default: DEFAULTS.element.transform.scaleY,
 		min: MIN_TRANSFORM_SCALE,
@@ -129,6 +133,7 @@ const visualElementParams: ElementParamDefinition[] = [
 	{
 		key: "transform.rotate",
 		label: "Rotate",
+		shortLabel: "R",
 		type: "number",
 		default: DEFAULTS.element.transform.rotate,
 		min: -360,
@@ -138,6 +143,7 @@ const visualElementParams: ElementParamDefinition[] = [
 	{
 		key: "opacity",
 		label: "Opacity",
+		shortLabel: "O",
 		type: "number",
 		default: DEFAULTS.element.opacity,
 		min: 0,
@@ -158,6 +164,7 @@ const audioElementParams: ElementParamDefinition[] = [
 	{
 		key: "volume",
 		label: "Volume",
+		shortLabel: "VOL",
 		type: "number",
 		default: DEFAULTS.element.volume,
 		min: VOLUME_DB_MIN,

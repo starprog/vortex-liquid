@@ -1,4 +1,5 @@
 import { buildStickerId, parseStickerId } from "../sticker-id";
+import { resolvePublicAssetUrl } from "./public-asset-url";
 import type {
 	StickerBrowseResult,
 	StickerItem,
@@ -15,7 +16,9 @@ const DEFAULT_FLAGS_BASE_URL = "/flags";
 let countriesPromise: Promise<CountryRecord[]> | null = null;
 
 function getFlagsBaseUrl(): string {
-	return DEFAULT_FLAGS_BASE_URL.replace(/\/$/, "");
+	return resolvePublicAssetUrl({
+		path: DEFAULT_FLAGS_BASE_URL.replace(/\/$/, ""),
+	}).replace(/\/$/, "");
 }
 
 function buildFlagUrl({ code }: { code: string }): string {

@@ -1,11 +1,14 @@
 "use client";
 
+console.log("Preview module loaded");
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useDeepCompareEffect from "use-deep-compare-effect";
 import { useEditor } from "@/editor/use-editor";
 import { useRafLoop } from "@/hooks/use-raf-loop";
 import { useContainerSize } from "@/hooks/use-container-size";
 import { useFullscreen } from "@/hooks/use-fullscreen";
+import { DEFAULT_CANVAS_SIZE } from "@/canvas/sizes";
 import { CanvasRenderer } from "@/services/renderer/canvas-renderer";
 import { TICKS_PER_SECOND } from "@/wasm";
 import type { RootNode } from "@/services/renderer/nodes/root-node";
@@ -30,8 +33,8 @@ function usePreviewSize() {
 	);
 
 	return {
-		width: canvasSize?.width,
-		height: canvasSize?.height,
+		width: canvasSize?.width && canvasSize.width > 0 ? canvasSize.width : DEFAULT_CANVAS_SIZE.width,
+		height: canvasSize?.height && canvasSize.height > 0 ? canvasSize.height : DEFAULT_CANVAS_SIZE.height,
 	};
 }
 
@@ -79,6 +82,7 @@ export function PreviewPanel({
 		<div
 			ref={handleContainerRef}
 			className="panel bg-background relative flex size-full min-h-0 min-w-0 flex-col rounded-sm border"
+			style={{ minHeight: 320, minWidth: 320 }}
 		>
 			<PreviewCanvas
 				container={container}
@@ -114,7 +118,22 @@ function RenderTreeController() {
 			background: activeProject.settings.background,
 			isPreview: true,
 		});
-
+		console.log("Render tree built", {
+			trackCount: tracks?.length ?? 0,
+			mediaAssetCount: mediaAssets?.length ?? 0,
+			duration,
+			canvasSize: { width, height },
+			renderTreeChildren: renderTree?.children?.length ?? 0,
+			renderTreePresent: !!renderTree,
+		});
+		(window as Window & { __previewDebug?: Record<string, unknown> }).__previewDebug = {
+			...(window as Window & { __previewDebug?: Record<string, unknown> }).__previewDebug,
+			renderTreePresent: !!renderTree,
+			renderTreeChildren: renderTree?.children?.length ?? 0,
+			duration,
+			trackCount: tracks?.length ?? 0,
+			mediaAssetCount: mediaAssets?.length ?? 0,
+		};
 		editor.renderer.setRenderTree({ renderTree });
 	}, [tracks, mediaAssets, activeProject?.settings.background, width, height]);
 
@@ -142,6 +161,7 @@ function PreviewCanvas({
 	const lastFrameRef = useRef(-1);
 	const lastSceneRef = useRef<RootNode | null>(null);
 	const renderingRef = useRef(false);
+	const firstFrameRetryDeadlineRef = useRef(0);
 	const { width: nativeWidth, height: nativeHeight } = usePreviewSize();
 	const viewportSize = useContainerSize({ containerRef: viewportRef });
 	const editor = useEditor();
@@ -156,6 +176,18 @@ function PreviewCanvas({
 	});
 	const { canPan, panByScreenDelta, scaleZoom } = viewport;
 
+	useEffect(() => {
+		console.log("PreviewCanvas mounted", {
+			nativeWidth,
+			nativeHeight,
+			viewportWidth: viewportSize.width,
+			viewportHeight: viewportSize.height,
+		});
+		if (viewportRef.current) {
+			viewportRef.current.setAttribute("data-preview-debug", "mounted");
+		}
+	}, [nativeHeight, nativeWidth, viewportSize.height, viewportSize.width]);
+
 	const renderer = useMemo(() => {
 		return new CanvasRenderer({
 			width: nativeWidth,
@@ -169,35 +201,116 @@ function PreviewCanvas({
 	// the container div owns positioning/styling, the canvas itself fills it.
 	useEffect(() => {
 		const mount = canvasMountRef.current;
-		if (!mount) return;
-		const outputCanvas = renderer.getOutputCanvas();
-		outputCanvas.style.display = "block";
-		outputCanvas.style.width = "100%";
-		outputCanvas.style.height = "100%";
-		mount.appendChild(outputCanvas);
-		return () => {
-			if (outputCanvas.parentElement === mount) {
-				mount.removeChild(outputCanvas);
+		if (!mount) {
+			console.warn("Preview mount is not ready");
+			return;
+		}
+		mount.setAttribute("data-preview-debug", "mount-effect-started");
+		try {
+			console.log("Preview canvas mount effect", {
+				mountPresent: !!mount,
+				viewportWidth: viewportSize.width,
+				viewportHeight: viewportSize.height,
+				nativeWidth,
+				nativeHeight,
+				canvasSize: { width: nativeWidth, height: nativeHeight },
+			});
+			(window as Window & { __previewMountLog?: unknown }).__previewMountLog = {
+				mountPresent: !!mount,
+				viewportWidth: viewportSize.width,
+				viewportHeight: viewportSize.height,
+				nativeWidth,
+				nativeHeight,
+				canvasSize: { width: nativeWidth, height: nativeHeight },
+			};
+			const outputCanvas = renderer.getOutputCanvas();
+			mount.setAttribute("data-preview-debug", `canvas:${outputCanvas?.constructor?.name}:${outputCanvas?.width}x${outputCanvas?.height}`);
+			console.log("Preview canvas mount", {
+				mountReady: true,
+				canvasType: outputCanvas?.constructor?.name,
+				canvasWidth: outputCanvas?.width,
+				canvasHeight: outputCanvas?.height,
+				parentTag: outputCanvas?.parentElement?.tagName,
+			});
+			(window as Window & { __previewMountLog?: unknown }).__previewMountLog = {
+				mountReady: true,
+				canvasType: outputCanvas?.constructor?.name,
+				canvasWidth: outputCanvas?.width,
+				canvasHeight: outputCanvas?.height,
+				parentTag: outputCanvas?.parentElement?.tagName,
+			};
+			outputCanvas.style.display = "block";
+			outputCanvas.style.width = "100%";
+			outputCanvas.style.height = "100%";
+			outputCanvas.style.background = "#111";
+			const mountCtx = outputCanvas.getContext("2d");
+			if (mountCtx) {
+				mountCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+				mountCtx.fillStyle = "#22c55e";
+				mountCtx.fillRect(0, 0, outputCanvas.width, outputCanvas.height);
 			}
-		};
-	}, [renderer]);
+			mount.appendChild(outputCanvas);
+			return () => {
+				if (outputCanvas.parentElement === mount) {
+					mount.removeChild(outputCanvas);
+				}
+			};
+		} catch (error) {
+			mount.setAttribute("data-preview-debug", `error:${error instanceof Error ? error.message : String(error)}`);
+			console.error("Preview canvas mount failed", error);
+		}
+	}, [nativeHeight, nativeWidth, renderer, viewportSize.height, viewportSize.width]);
 
 	const render = useCallback(() => {
-		if (!renderTree || renderingRef.current) return;
+		const debugState = {
+			renderTreePresent: !!renderTree,
+			renderTreeChildren: renderTree?.children?.length ?? 0,
+		};
+		(window as Window & { __previewDebug?: unknown }).__previewDebug = {
+			...(window as Window & { __previewDebug?: Record<string, unknown> }).__previewDebug,
+			...debugState,
+			timestamp: Date.now(),
+		};
+		if (!renderTree) return;
 
-		const renderTime = Math.min(
-			editor.playback.getCurrentTime(),
-			editor.timeline.getLastFrameTime(),
+		const tickState = {
+			currentTime: editor.playback.getCurrentTime(),
+			renderTime: Math.max(0, Math.min(editor.playback.getCurrentTime(), editor.timeline.getLastFrameTime())),
+			viewportWidth: viewportSize.width,
+			viewportHeight: viewportSize.height,
+			nativeWidth,
+			nativeHeight,
+			renderTreeChildren: renderTree?.children?.length ?? 0,
+			lastFrame: lastFrameRef.current,
+			rendering: renderingRef.current,
+		};
+		console.log("Preview render tick", tickState);
+		(window as Window & { __previewDebug?: unknown }).__previewDebug = {
+			...tickState,
+			timestamp: Date.now(),
+		};
+
+		const renderTime = Math.max(
+			0,
+			Math.min(
+				editor.playback.getCurrentTime(),
+				editor.timeline.getLastFrameTime(),
+			),
 		);
 		const ticksPerFrame = Math.round(
 			(TICKS_PER_SECOND * renderer.fps.denominator) / renderer.fps.numerator,
 		);
 		const frame = Math.floor(renderTime / ticksPerFrame);
+		const allowStartFrameRetry =
+			(frame === 0 || renderTime <= 0) &&
+			performance.now() < firstFrameRetryDeadlineRef.current;
 
-		if (
-			frame === lastFrameRef.current &&
-			renderTree === lastSceneRef.current
-		) {
+		const hasSameFrame =
+			frame === lastFrameRef.current && renderTree === lastSceneRef.current;
+		if (hasSameFrame && !allowStartFrameRetry) {
+			return;
+		}
+		if (renderingRef.current) {
 			return;
 		}
 
@@ -208,10 +321,56 @@ function PreviewCanvas({
 			.render({ node: renderTree, time: renderTime })
 			.then(() => {
 				renderingRef.current = false;
+				(window as Window & { __previewDebug?: unknown }).__previewDebug = {
+					...(window as Window & { __previewDebug?: Record<string, unknown> }).__previewDebug,
+					lastRenderSucceeded: true,
+					timestamp: Date.now(),
+				};
+			})
+			.catch((error) => {
+				renderingRef.current = false;
+				lastFrameRef.current = -1;
+				console.error("Preview render failed", error);
+				(window as Window & { __previewDebug?: unknown }).__previewDebug = {
+					...(window as Window & { __previewDebug?: Record<string, unknown> }).__previewDebug,
+					lastRenderSucceeded: false,
+					renderError: error instanceof Error ? error.message : String(error),
+					timestamp: Date.now(),
+				};
 			});
-	}, [renderer, renderTree, editor.playback, editor.timeline]);
+	}, [editor.playback, editor.timeline, nativeHeight, nativeWidth, renderer, renderTree, viewportSize.height, viewportSize.width]);
+
+	useEffect(() => {
+		console.log("Preview render loop active");
+	}, []);
+
+	useEffect(() => {
+		if (!renderTree) return;
+		void renderer
+			.render({
+				node: renderTree,
+				time: Math.max(0, editor.playback.getCurrentTime()),
+			})
+			.catch((error) => {
+				console.error("Initial preview render failed", error);
+			});
+	}, [editor.playback, renderer, renderTree]);
 
 	useRafLoop(render);
+
+	useEffect(() => {
+		lastFrameRef.current = -1;
+		firstFrameRetryDeadlineRef.current = performance.now() + 1200;
+	}, [renderTree]);
+
+	useEffect(() => {
+		const unsubscribeSeek = editor.playback.onSeek(() => {
+			lastFrameRef.current = -1;
+			firstFrameRetryDeadlineRef.current = performance.now() + 1200;
+		});
+
+		return unsubscribeSeek;
+	}, [editor.playback]);
 
 	useEffect(() => {
 		const container = viewportRef.current;
@@ -307,15 +466,17 @@ function PreviewCanvas({
 							<div
 								ref={viewportRef}
 								className="relative flex size-full min-h-0 min-w-0 items-center justify-center overflow-hidden"
+								style={{ minHeight: 240, minWidth: 240 }}
 							>
 							<div
 								ref={canvasMountRef}
+								data-preview-mount="true"
 								className="absolute block border"
 								style={{
-									left: viewport.sceneLeft,
-									top: viewport.sceneTop,
-									width: viewport.sceneWidth,
-									height: viewport.sceneHeight,
+									left: 0,
+									top: 0,
+									width: "100%",
+									height: "100%",
 									background:
 										activeProject.settings.background.type === "blur"
 											? "transparent"

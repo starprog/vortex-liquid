@@ -709,7 +709,7 @@ function KeyframeIndicators({
 			<button
 				key={indicator.time}
 				type="button"
-				className="pointer-events-auto absolute top-1/2 -translate-x-1/2 -translate-y-1/2 cursor-grab mr-0.5"
+				className="pointer-events-auto absolute top-1/2 -translate-x-1/2 -translate-y-1/2 cursor-crosshair active:cursor-grabbing mr-0.5"
 				style={{ left: visualOffsetPx }}
 				onMouseDown={(event) =>
 					onKeyframeMouseDown({ event, keyframes: indicator.keyframes })
@@ -855,7 +855,7 @@ function ExpandedKeyframeLanes({
 									key={kf.id}
 									type="button"
 									className={cn(
-										"pointer-events-auto absolute top-1/2 -translate-x-1/2 -translate-y-1/2 cursor-grab",
+										"pointer-events-auto absolute top-1/2 -translate-x-1/2 -translate-y-1/2 cursor-crosshair active:cursor-grabbing",
 										isBoxSelecting && "pointer-events-none",
 									)}
 									style={{ left: visualOffset }}

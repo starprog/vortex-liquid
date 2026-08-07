@@ -40,7 +40,7 @@ export function PreviewToolbar({
 	return (
 		<div className="grid grid-cols-[1fr_auto_1fr] items-center pb-3 pt-5 px-5">
 			<TimecodeDisplay />
-			<PlayPauseButton />
+			<TransportControls />
 			<div className="justify-self-end flex items-center gap-2.5">
 				<ZoomSelect />
 				<Separator orientation="vertical" className="h-4" />
@@ -61,6 +61,73 @@ export function PreviewToolbar({
 					<HugeiconsIcon icon={FullScreenIcon} />
 				</Button>
 			</div>
+		</div>
+	);
+}
+
+function TransportControls() {
+	const { shortcuts } = useKeyboardShortcutsHelp();
+
+	const getShortcutLabel = (action: string) => {
+		const shortcut = shortcuts.find((s) => s.action === action);
+		return shortcut ? ` (${shortcut.keys.join(" or ")})` : "";
+	};
+
+	return (
+		<div className="flex items-center gap-1">
+			<Tooltip delayDuration={200}>
+				<TooltipTrigger asChild>
+					<Button
+						variant="text"
+						size="icon"
+						onClick={() => invokeAction("goto-start")}
+					>
+						|&lt;
+					</Button>
+				</TooltipTrigger>
+				<TooltipContent>{`Go to start${getShortcutLabel("goto-start")}`}</TooltipContent>
+			</Tooltip>
+
+			<Tooltip delayDuration={200}>
+				<TooltipTrigger asChild>
+					<Button
+						variant="text"
+						size="icon"
+						onClick={() => invokeAction("seek-backward", { seconds: 1 })}
+					>
+						-1s
+					</Button>
+				</TooltipTrigger>
+				<TooltipContent>{`Back 1 second${getShortcutLabel("seek-backward")}`}</TooltipContent>
+			</Tooltip>
+
+			<PlayPauseButton />
+
+			<Tooltip delayDuration={200}>
+				<TooltipTrigger asChild>
+					<Button
+						variant="text"
+						size="icon"
+						onClick={() => invokeAction("seek-forward", { seconds: 1 })}
+					>
+						+1s
+					</Button>
+				</TooltipTrigger>
+				<TooltipContent>{`Forward 1 second${getShortcutLabel("seek-forward")}`}</TooltipContent>
+			</Tooltip>
+
+			<Tooltip delayDuration={200}>
+				<TooltipTrigger asChild>
+					<Button
+						variant="text"
+						size="icon"
+						onClick={() => invokeAction("goto-end")}
+					>
+						&gt;|
+					</Button>
+				</TooltipTrigger>
+				<TooltipContent>{`Go to end${getShortcutLabel("goto-end")}`}</TooltipContent>
+			</Tooltip>
 		</div>
 	);
 }

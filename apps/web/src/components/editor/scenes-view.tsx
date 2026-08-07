@@ -24,6 +24,8 @@ import {
 import { canDeleteScene, getMainScene } from "@/timeline/scenes";
 import { toast } from "sonner";
 import { useEditor } from "@/editor/use-editor";
+import { Pencil, Plus } from "lucide-react";
+import { Input } from "@/components/ui/input";
 
 export function ScenesView({ children }: { children: React.ReactNode }) {
 	const editor = useEditor();
@@ -31,6 +33,8 @@ export function ScenesView({ children }: { children: React.ReactNode }) {
 	const currentScene = editor.scenes.getActiveScene();
 	const [isSelectMode, setIsSelectMode] = useState(false);
 	const [selectedScenes, setSelectedScenes] = useState<Set<string>>(new Set());
+	const [editingSceneId, setEditingSceneId] = useState<string | null>(null);
+	const [editingName, setEditingName] = useState("");
 
 	const handleSceneSwitch = async (sceneId: string) => {
 		if (isSelectMode) {
@@ -60,6 +64,8 @@ export function ScenesView({ children }: { children: React.ReactNode }) {
 	const handleSelectMode = () => {
 		setIsSelectMode(!isSelectMode);
 		setSelectedScenes(new Set());
+		setEditingSceneId(null);
+		setEditingName("");
 	};
 
 	const handleDeleteSelected = async () => {
@@ -85,6 +91,61 @@ export function ScenesView({ children }: { children: React.ReactNode }) {
 		setIsSelectMode(false);
 	};
 
+	const handleAddScene = async () => {
+		const existingCount = scenes.filter((scene) => !scene.isMain).length;
+		const sceneName = `Scene ${existingCount + 1}`;
+
+		try {
+			const sceneId = await editor.scenes.createScene({
+				name: sceneName,
+				isMain: false,
+			});
+			await editor.scenes.switchToScene({ sceneId });
+			toast.success(`Created ${sceneName}`);
+		} catch (error) {
+			console.error("Failed to create scene:", error);
+			toast.error("Failed to create scene");
+		}
+	};
+
+	const handleStartRename = ({ sceneId, name }: { sceneId: string; name: string }) => {
+		setEditingSceneId(sceneId);
+		setEditingName(name);
+	};
+
+	const handleCancelRename = () => {
+		setEditingSceneId(null);
+		setEditingName("");
+	};
+
+	const handleSaveRename = async ({ sceneId }: { sceneId: string }) => {
+		const nextName = editingName.trim();
+		if (!nextName) {
+			toast.error("Scene name cannot be empty");
+			return;
+		}
+
+		const existingScene = scenes.find((scene) => scene.id === sceneId);
+		if (!existingScene) {
+			handleCancelRename();
+			return;
+		}
+
+		if (existingScene.name === nextName) {
+			handleCancelRename();
+			return;
+		}
+
+		try {
+			await editor.scenes.renameScene({ sceneId, name: nextName });
+			toast.success("Scene renamed");
+			handleCancelRename();
+		} catch (error) {
+			console.error("Failed to rename scene:", error);
+			toast.error("Failed to rename scene");
+		}
+	};
+
 	const isMainSceneSelected = (() => {
 		const mainScene = getMainScene({ scenes });
 		return Boolean(mainScene?.id && selectedScenes.has(mainScene.id));
@@ -106,6 +167,10 @@ export function ScenesView({ children }: { children: React.ReactNode }) {
 				</SheetHeader>
 				<div className="flex flex-col gap-4 py-4">
 					<div className="flex items-center gap-2">
+						<Button className="rounded-md" variant="default" size="sm" onClick={handleAddScene}>
+							<Plus />
+							Add Scene
+						</Button>
 						<Button
 							className="rounded-md"
 							variant={isSelectMode ? "default" : "outline"}
@@ -141,11 +206,12 @@ export function ScenesView({ children }: { children: React.ReactNode }) {
 					) : (
 						<div className="space-y-2">
 							{scenes.map((scene) => (
-								<Button
+								<div
 									key={scene.id}
-									variant="outline"
+									role="button"
+									tabIndex={0}
 									className={cn(
-										"w-full justify-between font-normal",
+										"border-input bg-background ring-offset-background hover:bg-accent hover:text-accent-foreground focus-visible:ring-ring flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm font-normal focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
 										currentScene?.id === scene.id &&
 											!isSelectMode &&
 											"border-primary !text-primary",
@@ -154,15 +220,71 @@ export function ScenesView({ children }: { children: React.ReactNode }) {
 											"bg-accent border-foreground/30",
 									)}
 									onClick={() => handleSceneSwitch(scene.id)}
+									onDoubleClick={() => {
+										if (!isSelectMode) {
+											handleStartRename({ sceneId: scene.id, name: scene.name });
+										}
+									}}
+									onKeyDown={(event) => {
+										if (event.key === "Enter" || event.key === " ") {
+											event.preventDefault();
+											void handleSceneSwitch(scene.id);
+										}
+									}}
 								>
-									<span>{scene.name}</span>
+									{editingSceneId === scene.id ? (
+										<div className="flex w-full items-center gap-2">
+											<Input
+												autoFocus
+												value={editingName}
+												onClick={(event) => event.stopPropagation()}
+												onChange={(event) => setEditingName(event.target.value)}
+												onKeyDown={(event) => {
+													event.stopPropagation();
+													if (event.key === "Enter") {
+														event.preventDefault();
+														void handleSaveRename({ sceneId: scene.id });
+													}
+													if (event.key === "Escape") {
+														event.preventDefault();
+														handleCancelRename();
+													}
+												}}
+											/>
+											<Button
+												size="sm"
+												variant="secondary"
+												onClick={(event) => {
+													event.stopPropagation();
+													void handleSaveRename({ sceneId: scene.id });
+												}}
+											>
+												Save
+											</Button>
+										</div>
+									) : (
+										<span>{scene.name}</span>
+									)}
 									<div className="flex items-center gap-2">
+										{!isSelectMode && editingSceneId !== scene.id && (
+											<Button
+												size="icon"
+												variant="ghost"
+												className="size-7"
+												onClick={(event) => {
+													event.stopPropagation();
+													handleStartRename({ sceneId: scene.id, name: scene.name });
+												}}
+											>
+												<Pencil className="size-4" />
+											</Button>
+										)}
 										{((isSelectMode && selectedScenes.has(scene.id)) ||
 											(!isSelectMode && currentScene?.id === scene.id)) && (
 											<Check className="size-4" />
 										)}
 									</div>
-								</Button>
+								</div>
 							))}
 						</div>
 					)}

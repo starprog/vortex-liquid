@@ -8,6 +8,10 @@ import { effectPreviewService } from "@/services/renderer/effect-preview";
 import { useEditor } from "@/editor/use-editor";
 import { buildEffectElement } from "@/timeline/element-utils";
 import type { EffectDefinition } from "@/effects/types";
+import { isVisualElement } from "@/timeline/element-utils";
+import { mediaTimeFromSeconds } from "@/wasm";
+import { usePropertiesStore } from "@/components/editor/panels/properties/stores/properties-store";
+import { toast } from "sonner";
 
 export function EffectsView() {
 	const effects = effectsRegistry.getAll();
@@ -55,19 +59,47 @@ function EffectPreviewCanvas({ effectType }: { effectType: string }) {
 
 function EffectItem({ effect }: { effect: EffectDefinition }) {
 	const editor = useEditor();
+	const setActivePropertiesTab = usePropertiesStore((s) => s.setActiveTab);
+	const selectedVisual = useEditor((currentEditor) => {
+		const selected = currentEditor.selection.getSelectedElements();
+		const matched = currentEditor.timeline.getElementsWithTracks({
+			elements: selected,
+		});
+		return matched.find(({ element }) => isVisualElement(element)) ?? null;
+	});
 
 	const handleAddToTimeline = useCallback(() => {
-		const currentTime = editor.playback.getCurrentTime();
-		const element = buildEffectElement({
-			effectType: effect.type,
-			startTime: currentTime,
-		});
+		try {
+			if (selectedVisual) {
+				editor.timeline.addClipEffect({
+					trackId: selectedVisual.track.id,
+					elementId: selectedVisual.element.id,
+					effectType: effect.type,
+				});
+				setActivePropertiesTab({
+					elementType: selectedVisual.element.type,
+					tabId: "effects",
+				});
+				return;
+			}
 
-		editor.timeline.insertElement({
-			placement: { mode: "auto", trackType: "effect" },
-			element,
-		});
-	}, [editor, effect.type]);
+			const currentTime = editor.playback.getCurrentTime();
+			const element = buildEffectElement({
+				effectType: effect.type,
+				startTime: currentTime,
+				duration: mediaTimeFromSeconds({ seconds: 2 }),
+			});
+
+			editor.timeline.insertElement({
+				placement: { mode: "auto", trackType: "effect" },
+				element,
+			});
+			setActivePropertiesTab({ elementType: "effect", tabId: "effects" });
+		} catch (error) {
+			console.error("Failed to add effect:", error);
+			toast.error("Could not apply effect to this layer.");
+		}
+	}, [editor, effect.type, selectedVisual, setActivePropertiesTab]);
 
 	const preview = <EffectPreviewCanvas effectType={effect.type} />;
 

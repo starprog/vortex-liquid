@@ -60,9 +60,17 @@ export function intensityToSigma({ intensity, resolution, reference }: { intensi
 	return (intensity / INTENSITY_TO_SIGMA_DIVISOR) * (resolution / reference);
 }
 
-function parseIntensity(effectParams: Record<string, unknown>): number {
+function parseIntensity(
+	effectParams: Record<string, unknown>,
+	fallback = 15,
+): number {
 	const raw = effectParams.intensity;
-	return typeof raw === "number" ? raw : Number.parseFloat(String(raw));
+	const parsed =
+		typeof raw === "number" ? raw : Number.parseFloat(String(raw));
+	if (Number.isNaN(parsed)) {
+		return fallback;
+	}
+	return Math.max(0, parsed);
 }
 
 export const blurEffectDefinition: EffectDefinition = {
@@ -74,7 +82,7 @@ export const blurEffectDefinition: EffectDefinition = {
 			key: "intensity",
 			label: "Intensity",
 			type: "number",
-			default: 15,
+			default: 8,
 			min: 0,
 			max: 100,
 			step: 1,

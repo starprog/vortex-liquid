@@ -18,9 +18,14 @@ export function MobileGate({ children }: MobileGateProps) {
 	const [show, setShow] = useState<boolean | null>(null);
 
 	useEffect(() => {
+		const params = new URLSearchParams(window.location.search);
+		const isEmbedded =
+			params.get("embedded") === "1" ||
+			params.get("host_app_url") !== null ||
+			window.self !== window.top;
 		const isMobile = window.innerWidth < 1024;
 		const acknowledged = localStorage.getItem(STORAGE_KEY) === "true";
-		setShow(isMobile && !acknowledged);
+		setShow(!isEmbedded && isMobile && !acknowledged);
 	}, []);
 
 	if (show === null) return null;

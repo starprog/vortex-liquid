@@ -920,7 +920,7 @@ function SortMenuItem({
 	const arrow = isActive ? (currentSortOrder === "asc" ? "↑" : "↓") : "";
 
 	return (
-		<DropdownMenuItem onClick={() => onSort({ key: sortKey })}>
+		<DropdownMenuItem onSelect={() => onSort({ key: sortKey })}>
 			{label} {arrow}
 		</DropdownMenuItem>
 	);

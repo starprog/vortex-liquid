@@ -202,11 +202,26 @@ async function resolveVideoNode({
 			clipTime,
 			retime: node.params.retime,
 		});
-	const frame = await videoCache.getFrameAt({
+	const sourceTimeSeconds = mediaTimeToSeconds({
+		time: roundMediaTime({ time: sourceTimeTicks }),
+	});
+	let frame = await videoCache.getFrameAt({
 		mediaId: node.params.mediaId,
 		file: node.params.file,
-		time: mediaTimeToSeconds({ time: roundMediaTime({ time: sourceTimeTicks }) }),
+		time: sourceTimeSeconds,
 	});
+	if (!frame && clipTime === 0) {
+		const fps =
+			context.renderer.fps.numerator > 0
+				? context.renderer.fps.numerator / context.renderer.fps.denominator
+				: 30;
+		const epsilonSeconds = 1 / Math.max(1, fps);
+		frame = await videoCache.getFrameAt({
+			mediaId: node.params.mediaId,
+			file: node.params.file,
+			time: sourceTimeSeconds + epsilonSeconds,
+		});
+	}
 	if (!frame) {
 		return null;
 	}

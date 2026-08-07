@@ -45,13 +45,17 @@ class EffectPreviewService {
 		targetCanvas.width = size;
 		targetCanvas.height = size;
 
-		const source = this.getTestSource({ width: size, height: size });
-		if (!source) {
-			targetCtx.clearRect(0, 0, size, size);
-			return;
-		}
-
 		try {
+			const source = this.getTestSource({ width: size, height: size });
+			if (!source) {
+				this.drawFallbackToTarget({
+					targetCtx,
+					width: size,
+					height: size,
+				});
+				return;
+			}
+
 			const definition = effectsRegistry.get(effectType);
 			const resolvedParams =
 				Object.keys(params).length > 0
@@ -74,8 +78,11 @@ class EffectPreviewService {
 			targetCtx.drawImage(result, 0, 0, size, size);
 		} catch (error) {
 			console.warn("Failed to render effect preview", { effectType, error });
-			targetCtx.clearRect(0, 0, size, size);
-			targetCtx.drawImage(source, 0, 0, size, size);
+			this.drawFallbackToTarget({
+				targetCtx,
+				width: size,
+				height: size,
+			});
 		}
 	}
 
@@ -99,16 +106,58 @@ class EffectPreviewService {
 		width: number;
 		height: number;
 	}): OffscreenCanvas | null {
-		const isImageReady =
-			this.previewImageElement?.complete &&
-			(this.previewImageElement.naturalWidth ?? 0) > 0;
-		if (!isImageReady || !this.previewImageElement) {
+		if (typeof OffscreenCanvas === "undefined") {
 			return null;
 		}
 
 		const { canvas, context } = createCanvasSurface({ width, height });
-		context.drawImage(this.previewImageElement, 0, 0, width, height);
+		const isImageReady =
+			this.previewImageElement?.complete &&
+			(this.previewImageElement.naturalWidth ?? 0) > 0;
+
+		if (isImageReady && this.previewImageElement) {
+			context.drawImage(this.previewImageElement, 0, 0, width, height);
+			return canvas;
+		}
+
+		// Fallback preview source keeps effect thumbnails useful even if preview.jpg is missing.
+		const gradient = context.createLinearGradient(0, 0, width, height);
+		gradient.addColorStop(0, "#0f172a");
+		gradient.addColorStop(0.5, "#0ea5e9");
+		gradient.addColorStop(1, "#f97316");
+		context.fillStyle = gradient;
+		context.fillRect(0, 0, width, height);
+
+		context.fillStyle = "rgba(255, 255, 255, 0.22)";
+		context.beginPath();
+		context.arc(width * 0.72, height * 0.3, width * 0.18, 0, Math.PI * 2);
+		context.fill();
+
+		context.fillStyle = "rgba(255, 255, 255, 0.32)";
+		context.fillRect(width * 0.12, height * 0.62, width * 0.76, height * 0.2);
+
 		return canvas;
+	}
+
+	private drawFallbackToTarget({
+		targetCtx,
+		width,
+		height,
+	}: {
+		targetCtx: CanvasRenderingContext2D;
+		width: number;
+		height: number;
+	}): void {
+		targetCtx.clearRect(0, 0, width, height);
+		const gradient = targetCtx.createLinearGradient(0, 0, width, height);
+		gradient.addColorStop(0, "#1f2937");
+		gradient.addColorStop(0.5, "#0ea5e9");
+		gradient.addColorStop(1, "#f59e0b");
+		targetCtx.fillStyle = gradient;
+		targetCtx.fillRect(0, 0, width, height);
+
+		targetCtx.fillStyle = "rgba(255, 255, 255, 0.28)";
+		targetCtx.fillRect(width * 0.14, height * 0.62, width * 0.72, height * 0.18);
 	}
 
 	private getTestSource({

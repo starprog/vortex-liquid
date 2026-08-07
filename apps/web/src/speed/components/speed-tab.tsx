@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { useEditor } from "@/editor/use-editor";
 import { NumberField } from "@/components/ui/number-field";
+import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { DashboardSpeed02Icon } from "@hugeicons/core-free-icons";
@@ -108,6 +109,18 @@ export function SpeedTab({
 		},
 	});
 
+	const nudgeSpeed = ({ direction }: { direction: -1 | 1 }) => {
+		const nextRate = clampRetimeRate({
+			rate: snapToStep({
+				value: pendingRateRef.current + direction * SPEED_STEP,
+				step: SPEED_STEP,
+			}),
+		});
+		pendingRateRef.current = nextRate;
+		speedDraft.scrubTo(nextRate);
+		speedDraft.commitScrub();
+	};
+
 	return (
 		<Section collapsible sectionKey={`${element.id}:speed`}>
 			<SectionHeader>
@@ -116,28 +129,50 @@ export function SpeedTab({
 			<SectionContent>
 				<SectionFields>
 					<SectionField label="Speed">
-						<NumberField
-							icon={<HugeiconsIcon icon={DashboardSpeed02Icon} />}
-							value={speedDraft.displayValue}
-							suffix="x"
-							scrubRanges={[
-								{ from: 0.01, to: 1, pixelsPerUnit: 160 },
-								{ from: 1, to: 5, pixelsPerUnit: 48 },
-							]}
-							scrubClamp={{ min: MIN_RETIME_RATE, max: MAX_RETIME_RATE }}
-							onFocus={() => {
-								pendingRateRef.current = rate;
-								speedDraft.onFocus();
-							}}
-							onChange={speedDraft.onChange}
-							onBlur={speedDraft.onBlur}
-							onScrub={speedDraft.scrubTo}
-							onScrubEnd={speedDraft.commitScrub}
-							onReset={() =>
-								commitRetime({ rate: DEFAULT_RETIME_RATE, maintainPitch })
-							}
-							isDefault={rate === DEFAULT_RETIME_RATE}
-						/>
+						<div className="flex items-center gap-1">
+							<Button
+								variant="ghost"
+								size="icon"
+								className="size-7 shrink-0"
+								type="button"
+								onClick={() => nudgeSpeed({ direction: -1 })}
+								aria-label="Decrease speed"
+							>
+								-
+							</Button>
+							<NumberField
+								icon={<HugeiconsIcon icon={DashboardSpeed02Icon} />}
+								value={speedDraft.displayValue}
+								suffix="x"
+								scrubRanges={[
+									{ from: 0.01, to: 1, pixelsPerUnit: 160 },
+									{ from: 1, to: 5, pixelsPerUnit: 48 },
+								]}
+								scrubClamp={{ min: MIN_RETIME_RATE, max: MAX_RETIME_RATE }}
+								onFocus={() => {
+									pendingRateRef.current = rate;
+									speedDraft.onFocus();
+								}}
+								onChange={speedDraft.onChange}
+								onBlur={speedDraft.onBlur}
+								onScrub={speedDraft.scrubTo}
+								onScrubEnd={speedDraft.commitScrub}
+								onReset={() =>
+									commitRetime({ rate: DEFAULT_RETIME_RATE, maintainPitch })
+								}
+								isDefault={rate === DEFAULT_RETIME_RATE}
+							/>
+							<Button
+								variant="ghost"
+								size="icon"
+								className="size-7 shrink-0"
+								type="button"
+								onClick={() => nudgeSpeed({ direction: 1 })}
+								aria-label="Increase speed"
+							>
+								+
+							</Button>
+						</div>
 					</SectionField>
 					<div className="flex items-center justify-between">
 						<span className="text-sm">Change pitch</span>

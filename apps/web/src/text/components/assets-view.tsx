@@ -4,102 +4,75 @@ import { useEditor } from "@/editor/use-editor";
 import { DEFAULTS } from "@/timeline/defaults";
 import { buildTextElement } from "@/timeline/element-utils";
 import type { MediaTime } from "@/wasm";
+import { useMemo } from "react";
+import { Button } from "@/components/ui/button";
 
-interface TextPreset {
-	id: string;
-	name: string;
-	content: string;
-	params?: Record<string, unknown>;
-}
-
-const TEXT_PRESETS: TextPreset[] = [
-	{
-		id: "default",
-		name: "Default text",
-		content: "Default text",
-	},
-	{
-		id: "headline-bold",
-		name: "Bold Headline",
-		content: "YOUR BIG IDEA",
-		params: {
-			fontSize: 56,
-			fontWeight: "bold",
-			lineHeight: 1.05,
-			letterSpacing: 1.2,
-			color: "#FFFFFF",
-			"background.enabled": true,
-			"background.color": "#111827",
-			"background.cornerRadius": 14,
-			"background.paddingX": 22,
-			"background.paddingY": 10,
-			"background.offsetX": 0,
-			"background.offsetY": 0,
-		},
-	},
-	{
-		id: "caption-highlight",
-		name: "Caption Highlight",
-		content: "This moment matters.",
-		params: {
-			fontSize: 36,
-			fontWeight: "bold",
-			color: "#111827",
-			textAlign: "center",
-			"background.enabled": true,
-			"background.color": "#FDE047",
-			"background.cornerRadius": 8,
-			"background.paddingX": 14,
-			"background.paddingY": 8,
-			"background.offsetX": 0,
-			"background.offsetY": 0,
-		},
-	},
-	{
-		id: "neon-title",
-		name: "Neon Title",
-		content: "NEON VIBES",
-		params: {
-			fontSize: 52,
-			fontWeight: "bold",
-			letterSpacing: 2,
-			lineHeight: 1.05,
-			color: "#67E8F9",
-			"background.enabled": true,
-			"background.color": "#0F172A",
-			"background.cornerRadius": 12,
-			"background.paddingX": 18,
-			"background.paddingY": 10,
-			"background.offsetX": 0,
-			"background.offsetY": 0,
-		},
-	},
-];
+const DEFAULT_TEXT_CONTENT = "Text";
 
 export function TextView() {
 	const editor = useEditor();
+ 	const activeScene = useEditor((currentEditor) =>
+		currentEditor.scenes.getActiveSceneOrNull(),
+	);
+
+	const textItems = useMemo(() => {
+		if (!activeScene) {
+			return [] as Array<{ trackId: string; elementId: string; content: string; name: string }>;
+		}
+
+		const candidateTracks = [
+			...activeScene.tracks.overlay,
+			activeScene.tracks.main,
+		];
+
+		return candidateTracks
+			.flatMap((track) =>
+				track.elements.flatMap((element) => {
+					if (element.type !== "text") {
+						return [];
+					}
+
+					const rawContent = element.params.content;
+					const content =
+						typeof rawContent === "string" && rawContent.trim().length > 0
+							? rawContent
+							: "Text";
+
+					return [
+						{
+							trackId: track.id,
+							elementId: element.id,
+							content,
+							name: element.name,
+							startTime: element.startTime,
+						},
+					];
+				}),
+			)
+			.sort((a, b) => a.startTime - b.startTime)
+			.map(({ trackId, elementId, content, name }) => ({
+				trackId,
+				elementId,
+				content,
+				name,
+			}));
+	}, [activeScene]);
 
 	const handleAddToTimeline = ({
 		currentTime,
-		preset,
 	}: {
 		currentTime: MediaTime;
-		preset: TextPreset;
 	}) => {
-		const activeScene = editor.scenes.getActiveScene();
-		if (!activeScene) return;
-
 		const baseParams = DEFAULTS.text.element.params ?? {};
-		const presetParams = preset.params ?? {};
 
 		const element = buildTextElement({
 			raw: {
 				...DEFAULTS.text.element,
-				name: preset.name,
+				name: "Text",
 				params: {
 					...baseParams,
-					...presetParams,
-					content: preset.content,
+					content: DEFAULT_TEXT_CONTENT,
+					fontSize: 12,
 				},
 			},
 			startTime: currentTime,
@@ -111,31 +84,69 @@ export function TextView() {
 		});
 	};
 
+	const handleSelectTextElement = ({
+		trackId,
+		elementId,
+	}: {
+		trackId: string;
+		elementId: string;
+	}) => {
+		editor.selection.setSelectedElements({
+			elements: [{ trackId, elementId }],
+		});
+	};
+
 	return (
 		<PanelView title="Text">
-			<div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))" }}>
-				{TEXT_PRESETS.map((preset) => (
+			<div className="flex h-full flex-col gap-4">
+				<div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))" }}>
 					<DraggableItem
-						key={preset.id}
-						name={preset.name}
+						name="Default text"
 						preview={
 							<div className="bg-accent flex size-full items-center justify-center rounded p-2">
-								<span className="line-clamp-2 text-center text-xs select-none">{preset.content}</span>
+								<span className="line-clamp-2 text-center text-xs select-none">{DEFAULT_TEXT_CONTENT}</span>
 							</div>
 						}
 						dragData={{
-							id: `temp-text-${preset.id}`,
+							id: "temp-text-default",
 							type: DEFAULTS.text.element.type,
-							name: preset.name,
-							content: preset.content,
+							name: "Text",
+							content: DEFAULT_TEXT_CONTENT,
 						}}
 						aspectRatio={1}
 						onAddToTimeline={({ currentTime }) =>
-							handleAddToTimeline({ currentTime, preset })
+							handleAddToTimeline({ currentTime })
 						}
 						shouldShowLabel={false}
 					/>
-				))}
+				</div>
+
+				<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+					<p className="text-muted-foreground text-xs">Text in this scene</p>
+					<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
+						{textItems.length === 0 ? (
+							<p className="text-muted-foreground text-sm">
+								No text clips yet. Add one to start editing.
+							</p>
+						) : (
+							textItems.map((item) => (
+								<Button
+									key={item.elementId}
+									variant="outline"
+									className="w-full justify-start text-left"
+									onClick={() =>
+										handleSelectTextElement({
+											trackId: item.trackId,
+											elementId: item.elementId,
+										})
+									}
+								>
+									<span className="truncate">{item.content}</span>
+								</Button>
+							))
+						)}
+					</div>
+				</div>
 			</div>
 		</PanelView>
 	);

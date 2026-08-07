@@ -12,6 +12,7 @@ import {
 } from "@/utils/math";
 import { SectionField } from "@/components/section";
 import { NumberField } from "@/components/ui/number-field";
+import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { ColorPicker } from "@/components/ui/color-picker";
 import {
@@ -207,18 +208,51 @@ function NumberParamField({
 		onCommit();
 	};
 
+	const stepDisplayValue = ({ direction }: { direction: -1 | 1 }) => {
+		const nextDisplayValue = clampDisplayValue(
+			snapToStep({
+				value: displayValue + direction * step,
+				step,
+			}),
+		);
+		onPreview(nextDisplayValue / displayMultiplier);
+		onCommit();
+	};
+
 	return (
-		<NumberField
-			icon={param.shortLabel}
-			value={draft.displayValue}
-			dragSensitivity="slow"
-			isDefault={value === param.default}
-			onFocus={draft.onFocus}
-			onChange={draft.onChange}
-			onBlur={draft.onBlur}
-			onScrub={previewFromDisplay}
-			onScrubEnd={onCommit}
-			onReset={handleReset}
-		/>
+		<div className="flex items-center gap-1">
+			<Button
+				variant="ghost"
+				size="icon"
+				className="size-7 shrink-0"
+				type="button"
+				onClick={() => stepDisplayValue({ direction: -1 })}
+				aria-label={`Decrease ${param.label}`}
+			>
+				-
+			</Button>
+			<NumberField
+				icon={param.shortLabel}
+				value={draft.displayValue}
+				dragSensitivity="slow"
+				isDefault={value === param.default}
+				onFocus={draft.onFocus}
+				onChange={draft.onChange}
+				onBlur={draft.onBlur}
+				onScrub={previewFromDisplay}
+				onScrubEnd={onCommit}
+				onReset={handleReset}
+			/>
+			<Button
+				variant="ghost"
+				size="icon"
+				className="size-7 shrink-0"
+				type="button"
+				onClick={() => stepDisplayValue({ direction: 1 })}
+				aria-label={`Increase ${param.label}`}
+			>
+				+
+			</Button>
+		</div>
 	);
 }
