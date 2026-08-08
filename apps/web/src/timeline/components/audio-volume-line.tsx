@@ -113,6 +113,12 @@ export function AudioVolumeLine({
 			.filter((keyframe) => keyframe.propertyPath === "volume")
 			.sort((left, right) => left.time - right.time);
 	}, [resolvedAnimations]);
+	// Persisted (non-preview) keyframes, used to heal boundary anchors without fighting a live drag.
+	const committedVolumeKeyframes = useMemo(() => {
+		return getElementKeyframes({ animations: element.animations })
+			.filter((keyframe) => keyframe.propertyPath === "volume")
+			.sort((left, right) => left.time - right.time);
+	}, [element.animations]);
 	// Straight keyframe-to-keyframe segments, matching Adobe Premiere Pro's clip volume rubber band.
 	const envelopePoints = useMemo(() => {
 		const duration = Math.max(1, element.duration);
@@ -172,16 +178,17 @@ export function AudioVolumeLine({
 				return animations;
 			}
 
+			const baseVolume = getElementVolume({ element });
 			const firstKeyframeValue = keyframes[0].value;
 			const lastKeyframeValue = keyframes[keyframes.length - 1].value;
 			const firstValue =
 				typeof firstKeyframeValue === "number"
 					? clampVolume({ value: firstKeyframeValue })
-					: currentVolume;
+					: baseVolume;
 			const lastValue =
 				typeof lastKeyframeValue === "number"
 					? clampVolume({ value: lastKeyframeValue })
-					: currentVolume;
+					: baseVolume;
 
 			let nextAnimations = animations;
 			if (missingStart) {
@@ -206,24 +213,23 @@ export function AudioVolumeLine({
 			}
 			return nextAnimations;
 		},
-		[coerceVolumeValue, currentVolume, element.duration],
+		[coerceVolumeValue, element],
 	);
 
-	const hasNormalizedBoundariesRef = useRef(false);
+	// Heals legacy/stray keyframe data (and project data still loading in async) so the
+	// envelope always spans the full clip. Operates on committed data only (never the live
+	// drag preview) and bails out once anchors are already present, so it can't loop against
+	// the commit it just made or fight an in-progress drag.
 	useEffect(() => {
-		if (hasNormalizedBoundariesRef.current || volumeKeyframes.length === 0) {
+		if (isDragging || committedVolumeKeyframes.length === 0) {
 			return;
 		}
 
-		hasNormalizedBoundariesRef.current = true;
-		const nextAnimations = ensureBoundaryAnchors(element.animations, volumeKeyframes);
+		const nextAnimations = ensureBoundaryAnchors(element.animations, committedVolumeKeyframes);
 		if (nextAnimations !== element.animations) {
 			commitAnimations(nextAnimations);
 		}
-		// Runs once on mount to heal legacy keyframe data; re-running on every
-		// volumeKeyframes change would fight with the commit this effect itself causes.
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, []);
+	}, [commitAnimations, committedVolumeKeyframes, element.animations, ensureBoundaryAnchors, isDragging]);
 
 	// Uniform (non-keyframed) volume drag on a flat line — never creates a keyframe.
 	const previewVolume = useCallback(
