@@ -1,3 +1,4 @@
+import { getElementKeyframes } from "@/animation";
 import { hasKeyframesForPath } from "@/animation/keyframe-query";
 import { resolveNumberAtTime } from "@/animation/values";
 import { VOLUME_DB_MAX, VOLUME_DB_MIN } from "./audio-constants";
@@ -107,27 +108,64 @@ export function buildAudioGainAutomation({
 		Number.isFinite(stepSeconds) && stepSeconds > 0
 			? stepSeconds
 			: DEFAULT_STEP_SECONDS;
-	const points: Array<{ localTime: number; gain: number }> = [];
 
-	for (let localTime = startTime; localTime < endTime; localTime += safeStep) {
-		points.push({
-			localTime,
-			gain: resolveEffectiveAudioGain({
-				element,
-				trackMuted,
-				localTime,
-			}),
+	const sampleAt = (localTime: number) => ({
+		localTime,
+		gain: resolveEffectiveAudioGain({ element, trackMuted, localTime }),
+	});
+
+	const volumeKeyframes = getElementKeyframes({ animations: element.animations })
+		.filter((keyframe) => keyframe.propertyPath === "volume")
+		.map((keyframe) => ({
+			timeSeconds: keyframe.time / TICKS_PER_SECOND,
+			interpolation: keyframe.interpolation,
+		}))
+		.sort((left, right) => left.timeSeconds - right.timeSeconds);
+
+	// Every segment is piecewise-linear (or flat, outside the keyframe range)
+	// except "bezier" ones, so sampling just the segment endpoints reproduces
+	// the exact same automation curve with far fewer scheduled ramp points —
+	// dense resampling is only needed inside the (rare) curved segments.
+	const curvedRanges: Array<{ from: number; to: number }> = [];
+	for (let index = 0; index < volumeKeyframes.length - 1; index++) {
+		if (volumeKeyframes[index].interpolation !== "bezier") {
+			continue;
+		}
+		curvedRanges.push({
+			from: Math.max(startTime, volumeKeyframes[index].timeSeconds),
+			to: Math.min(endTime, volumeKeyframes[index + 1].timeSeconds),
 		});
 	}
 
-	points.push({
-		localTime: endTime,
-		gain: resolveEffectiveAudioGain({
-			element,
-			trackMuted,
-			localTime: endTime,
-		}),
-	});
+	const criticalTimes = new Set<number>([startTime, endTime]);
+	for (const keyframe of volumeKeyframes) {
+		if (keyframe.timeSeconds > startTime && keyframe.timeSeconds < endTime) {
+			criticalTimes.add(keyframe.timeSeconds);
+		}
+	}
+	const sortedCriticalTimes = Array.from(criticalTimes).sort((left, right) => left - right);
+
+	const points: Array<{ localTime: number; gain: number }> = [];
+	for (let index = 0; index < sortedCriticalTimes.length; index++) {
+		const localTime = sortedCriticalTimes[index];
+		points.push(sampleAt(localTime));
+
+		const nextTime = sortedCriticalTimes[index + 1];
+		if (nextTime === undefined) {
+			continue;
+		}
+
+		const isCurvedSegment = curvedRanges.some(
+			(range) => range.to > range.from && localTime >= range.from && nextTime <= range.to,
+		);
+		if (!isCurvedSegment) {
+			continue;
+		}
+
+		for (let denseTime = localTime + safeStep; denseTime < nextTime; denseTime += safeStep) {
+			points.push(sampleAt(denseTime));
+		}
+	}
 
 	return points;
 }
