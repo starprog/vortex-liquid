@@ -1,9 +1,11 @@
 import type { FontAtlas } from "@/fonts/types";
 import { SYSTEM_FONTS } from "@/fonts/system-fonts";
+import { webEnv } from "@/env/web";
 
 const GOOGLE_FONTS_CSS = "https://fonts.googleapis.com/css2";
-const FONT_ATLAS_PATH = "/fonts/font-atlas.json";
-const FONT_CHUNK_PATH_PREFIX = "/fonts/font-chunk-";
+// Hardcoded absolute paths aren't rewritten by Next's basePath/assetPrefix, so prefix manually.
+const FONT_ATLAS_PATH = `${webEnv.NEXT_PUBLIC_BASE_PATH}/fonts/font-atlas.json`;
+export const FONT_CHUNK_PATH_PREFIX = `${webEnv.NEXT_PUBLIC_BASE_PATH}/fonts/font-chunk-`;
 
 const fullLoaded = new Set<string>();
 

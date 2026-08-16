@@ -11,6 +11,11 @@ const basePath = normalizedBasePath === "/" ? "" : normalizedBasePath;
 const nextConfig: NextConfig = {
 	basePath: basePath || undefined,
 	assetPrefix: basePath || undefined,
+	// basePath/assetPrefix only rewrite Next's own asset handling; expose the
+	// value so client code can prefix its own hardcoded fetch()/url() paths.
+	env: {
+		NEXT_PUBLIC_BASE_PATH: basePath,
+	},
 	compiler: {
 		removeConsole: process.env.NODE_ENV === "production",
 	},
