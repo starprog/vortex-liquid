@@ -19,6 +19,17 @@ import { frameRateToFloat } from "@/fps/utils";
 import type { RootNode } from "./nodes/root-node";
 import type { ExportFormat, ExportQuality } from "@/export";
 import { CanvasRenderer } from "./canvas-renderer";
+import {
+	raceWithWatchdog,
+	WatchdogCancelledError,
+	WatchdogTimeoutError,
+} from "@/utils/watchdog";
+
+// Safety net independent of the cancel button: a single frame render should
+// normally take well under a second. If something in the render chain
+// (video decoding, effects, etc.) stalls, give up on the whole export
+// instead of hanging forever with no feedback.
+const FRAME_RENDER_TIMEOUT_MS = 20_000;
 
 type ExportParams = {
 	width: number;
@@ -143,7 +154,34 @@ export class SceneExporter extends EventEmitter<SceneExporterEvents> {
 
 			const timeTicks = i * ticksPerFrame;
 			const timeSeconds = mediaTimeToSeconds({ time: timeTicks });
-			await this.renderer.render({ node: rootNode, time: timeTicks });
+
+			try {
+				await raceWithWatchdog({
+					promise: this.renderer.render({ node: rootNode, time: timeTicks }),
+					isCancelled: () => this.isCancelled,
+					timeoutMs: FRAME_RENDER_TIMEOUT_MS,
+				});
+			} catch (error) {
+				if (this.isCancelled || error instanceof WatchdogCancelledError) {
+					await output.cancel();
+					this.emit("cancelled");
+					return null;
+				}
+
+				if (error instanceof WatchdogTimeoutError) {
+					await output.cancel();
+					this.emit(
+						"error",
+						new Error(
+							"Export stalled while rendering a frame. This usually means one of the media files in your project has a decoding issue.",
+						),
+					);
+					return null;
+				}
+
+				throw error;
+			}
+
 			await videoSource.add(timeSeconds, 1 / fpsFloat);
 
 			this.emit("progress", i / frameCount);
