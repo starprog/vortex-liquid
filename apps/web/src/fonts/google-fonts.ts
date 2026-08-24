@@ -1,11 +1,13 @@
 import type { FontAtlas } from "@/fonts/types";
 import { SYSTEM_FONTS } from "@/fonts/system-fonts";
-import { webEnv } from "@/env/web";
 
 const GOOGLE_FONTS_CSS = "https://fonts.googleapis.com/css2";
 // Hardcoded absolute paths aren't rewritten by Next's basePath/assetPrefix, so prefix manually.
-const FONT_ATLAS_PATH = `${webEnv.NEXT_PUBLIC_BASE_PATH}/fonts/font-atlas.json`;
-export const FONT_CHUNK_PATH_PREFIX = `${webEnv.NEXT_PUBLIC_BASE_PATH}/fonts/font-chunk-`;
+// Reference process.env directly (not the webEnv/zod singleton, which also requires
+// server-only secrets and would throw if evaluated in the browser bundle).
+const NEXT_PUBLIC_BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+const FONT_ATLAS_PATH = `${NEXT_PUBLIC_BASE_PATH}/fonts/font-atlas.json`;
+export const FONT_CHUNK_PATH_PREFIX = `${NEXT_PUBLIC_BASE_PATH}/fonts/font-chunk-`;
 
 const fullLoaded = new Set<string>();
 
