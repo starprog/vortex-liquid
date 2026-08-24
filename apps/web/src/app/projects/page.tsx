@@ -18,6 +18,7 @@ import { useEditor } from "@/editor/use-editor";
 import { RenameProjectDialog } from "@/project/components/rename-project-dialog";
 import { useProjectsStore } from "./store";
 import type {
+	TCanvasSize,
 	TProjectMetadata,
 	TProjectSortKey,
 	TProjectSortOption,
@@ -655,10 +656,14 @@ function NewProjectButton() {
 		setIsCreateDialogOpen(true);
 	};
 
-	const handleConfirmCreateProject = async (name: string) => {
+	const handleConfirmCreateProject = async (
+		name: string,
+		canvasSize?: TCanvasSize,
+	) => {
 		const projectName = name.trim() || "New project";
 		const projectId = await editor.project.createNewProject({
 			name: projectName,
+			canvasSize,
 		});
 		setIsCreateDialogOpen(false);
 		router.push(`/editor/${projectId}`);
@@ -681,6 +686,7 @@ function NewProjectButton() {
 				projectName="New project"
 				title="Create project"
 				confirmLabel="Create"
+				showCanvasSizeOptions
 			/>
 		</>
 	);
@@ -1111,12 +1117,23 @@ function EmptyState() {
 	const router = useRouter();
 	const editor = useEditor();
 	const savedProjects = editor.project.getSavedProjects();
+	const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 
-	const handleCreateProject = async () => {
+	const handleCreateProject = () => {
+		setIsCreateDialogOpen(true);
+	};
+
+	const handleConfirmCreateProject = async (
+		name: string,
+		canvasSize?: TCanvasSize,
+	) => {
 		try {
+			const projectName = name.trim() || "New project";
 			const projectId = await editor.project.createNewProject({
-				name: "New project",
+				name: projectName,
+				canvasSize,
 			});
+			setIsCreateDialogOpen(false);
 			router.push(`/editor/${projectId}`);
 		} catch (error) {
 			toast.error("Failed to create project", {
@@ -1171,6 +1188,15 @@ function EmptyState() {
 				<HugeiconsIcon icon={PlusSignIcon} />
 				Create your first project
 			</Button>
+			<RenameProjectDialog
+				isOpen={isCreateDialogOpen}
+				onOpenChange={setIsCreateDialogOpen}
+				onConfirm={handleConfirmCreateProject}
+				projectName="New project"
+				title="Create project"
+				confirmLabel="Create"
+				showCanvasSizeOptions
+			/>
 		</div>
 	);
 }
