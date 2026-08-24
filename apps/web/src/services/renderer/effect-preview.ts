@@ -3,11 +3,12 @@ import { effectsRegistry, resolveEffectPasses } from "@/effects";
 import { buildDefaultParamValues } from "@/params/registry";
 import type { ParamValues } from "@/params";
 import { gpuRenderer } from "./gpu-renderer";
-import { webEnv } from "@/env/web";
 
 const PREVIEW_SIZE = 160;
 // Hardcoded absolute path isn't rewritten by Next's basePath/assetPrefix, so prefix manually.
-const PREVIEW_IMAGE_PATH = `${webEnv.NEXT_PUBLIC_BASE_PATH}/effects/preview.jpg`;
+// Reference process.env directly (not the webEnv/zod singleton, which also requires
+// server-only secrets and would throw if evaluated in the browser bundle).
+const PREVIEW_IMAGE_PATH = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/effects/preview.jpg`;
 
 class EffectPreviewService {
 	private testSourceCanvas: OffscreenCanvas | null = null;
