@@ -5,6 +5,15 @@ import {
 	CanvasSink,
 	type WrappedCanvas,
 } from "mediabunny";
+import { raceWithWatchdog } from "@/utils/watchdog";
+
+// mediabunny's CanvasSink generator wraps a WebCodecs VideoDecoder with no
+// AbortSignal. On a problematic file the decoder can stall forever without
+// ever resolving or rejecting `iterator.next()`. These timeouts stop us from
+// waiting on a stalled decode forever, so both the live preview and exports
+// can recover instead of hanging.
+const FRAME_DECODE_TIMEOUT_MS = 8_000;
+const ITERATOR_DISPOSE_TIMEOUT_MS = 2_000;
 
 interface VideoSinkData {
 	input: Input;
@@ -132,7 +141,10 @@ export class VideoCache {
 					sinkData.currentFrame = sinkData.nextFrame;
 					sinkData.nextFrame = null;
 				} else {
-					const { value: frame, done } = await sinkData.iterator.next();
+					const { value: frame, done } = await raceWithWatchdog({
+						promise: sinkData.iterator.next(),
+						timeoutMs: FRAME_DECODE_TIMEOUT_MS,
+					});
 
 					if (done || !frame) break;
 
@@ -170,8 +182,15 @@ export class VideoCache {
 			}
 
 			if (sinkData.iterator) {
-				await sinkData.iterator.return();
+				const staleIterator = sinkData.iterator;
 				sinkData.iterator = null;
+				// Don't block on disposing the old iterator: if its underlying
+				// decode is stalled, `.return()` can hang too. Fire-and-forget
+				// with a short cap instead of awaiting it.
+				void raceWithWatchdog({
+					promise: staleIterator.return(),
+					timeoutMs: ITERATOR_DISPOSE_TIMEOUT_MS,
+				}).catch(() => {});
 			}
 
 			sinkData.nextFrame = null;
@@ -179,7 +198,10 @@ export class VideoCache {
 			sinkData.lastTime = time;
 
 			// Fetch current frame
-			const { value: frame } = await sinkData.iterator.next();
+			const { value: frame } = await raceWithWatchdog({
+				promise: sinkData.iterator.next(),
+				timeoutMs: FRAME_DECODE_TIMEOUT_MS,
+			});
 
 			if (frame) {
 				sinkData.currentFrame = frame;
@@ -188,6 +210,9 @@ export class VideoCache {
 			}
 		} catch (error) {
 			console.warn("Failed to seek video:", error);
+			// Abandon the (possibly stalled) iterator so the next call starts
+			// fresh instead of reusing something that may never settle.
+			sinkData.iterator = null;
 		}
 
 		return null;
@@ -214,7 +239,10 @@ export class VideoCache {
 		}
 
 		try {
-			const { value: frame, done } = await sinkData.iterator.next();
+			const { value: frame, done } = await raceWithWatchdog({
+				promise: sinkData.iterator.next(),
+				timeoutMs: FRAME_DECODE_TIMEOUT_MS,
+			});
 
 			if (done || !frame) {
 				sinkData.prefetching = false;

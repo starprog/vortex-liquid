@@ -8,10 +8,19 @@ import { createTimelineAudioBuffer } from "@/media/audio";
 import { formatTimecode } from "opencut-wasm";
 import { frameRateToFloat } from "@/fps/utils";
 import { downloadBlob } from "@/utils/browser";
+import {
+	raceWithWatchdog,
+	WatchdogCancelledError,
+} from "@/utils/watchdog";
 
 type SnapshotResult =
 	| { success: true; blob: Blob; filename: string }
 	| { success: false; error: string };
+
+// Mixing timeline audio decodes every audible clip via WebCodecs and can
+// stall forever on a problematic file. Give up and export without audio
+// (rather than hang) if it takes unreasonably long.
+const AUDIO_MIX_TIMEOUT_MS = 30_000;
 
 export class RendererManager {
 	private renderTree: RootNode | null = null;
@@ -166,61 +175,95 @@ export class RendererManager {
 			const exportFps = fps ?? activeProject.settings.fps;
 			const canvasSize = activeProject.settings.canvasSize;
 
-			let audioBuffer: AudioBuffer | null = null;
-			if (includeAudio) {
-				onProgress?.({ progress: 0.05 });
-				audioBuffer = await createTimelineAudioBuffer({
+			// Started up-front (before the audio mix step) so a cancel click
+			// takes effect even if audio mixing stalls on a problematic file.
+			let cancelled = false;
+			let exporterRef: SceneExporter | null = null;
+			const cancelWatcher = setInterval(() => {
+				if (cancelled) return;
+				if (onCancel?.()) {
+					cancelled = true;
+					exporterRef?.cancel();
+				}
+			}, 100);
+
+			try {
+				let audioBuffer: AudioBuffer | null = null;
+				if (includeAudio) {
+					onProgress?.({ progress: 0.05 });
+					try {
+						audioBuffer = await raceWithWatchdog({
+							promise: createTimelineAudioBuffer({
+								tracks,
+								mediaAssets,
+								duration,
+							}),
+							isCancelled: () => cancelled,
+							timeoutMs: AUDIO_MIX_TIMEOUT_MS,
+						});
+					} catch (error) {
+						if (cancelled || error instanceof WatchdogCancelledError) {
+							return { success: false, cancelled: true };
+						}
+
+						console.warn(
+							"Timeline audio mix stalled or failed; exporting without audio:",
+							error,
+						);
+						audioBuffer = null;
+					}
+				}
+
+				if (cancelled) {
+					return { success: false, cancelled: true };
+				}
+
+				const scene = buildScene({
 					tracks,
 					mediaAssets,
 					duration,
+					canvasSize,
+					background: activeProject.settings.background,
 				});
-			}
 
-			const scene = buildScene({
-				tracks,
-				mediaAssets,
-				duration,
-				canvasSize,
-				background: activeProject.settings.background,
-			});
+				const exporter = new SceneExporter({
+					width: canvasSize.width,
+					height: canvasSize.height,
+					fps: exportFps,
+					format,
+					quality,
+					shouldIncludeAudio: !!includeAudio && !!audioBuffer,
+					audioBuffer: audioBuffer || undefined,
+				});
+				exporterRef = exporter;
 
-			const exporter = new SceneExporter({
-				width: canvasSize.width,
-				height: canvasSize.height,
-				fps: exportFps,
-				format,
-				quality,
-				shouldIncludeAudio: !!includeAudio,
-				audioBuffer: audioBuffer || undefined,
-			});
-
-			exporter.on("progress", (progress) => {
-				const adjustedProgress = includeAudio
-					? 0.05 + progress * 0.95
-					: progress;
-				onProgress?.({ progress: adjustedProgress });
-			});
-
-			let cancelled = false;
-			const checkCancel = () => {
-				if (onCancel?.()) {
-					cancelled = true;
+				if (cancelled) {
 					exporter.cancel();
 				}
-			};
 
-			const cancelInterval = setInterval(checkCancel, 100);
+				exporter.on("progress", (progress) => {
+					const adjustedProgress = includeAudio
+						? 0.05 + progress * 0.95
+						: progress;
+					onProgress?.({ progress: adjustedProgress });
+				});
 
-			try {
+				let exportError: Error | null = null;
+				exporter.on("error", (error) => {
+					exportError = error;
+				});
+
 				const buffer = await exporter.export({ rootNode: scene });
-				clearInterval(cancelInterval);
 
 				if (cancelled) {
 					return { success: false, cancelled: true };
 				}
 
 				if (!buffer) {
-					return { success: false, error: "Export failed to produce buffer" };
+					return {
+						success: false,
+						error: exportError?.message ?? "Export failed to produce buffer",
+					};
 				}
 
 				return {
@@ -228,7 +271,7 @@ export class RendererManager {
 					buffer,
 				};
 			} finally {
-				clearInterval(cancelInterval);
+				clearInterval(cancelWatcher);
 			}
 		} catch (error) {
 			console.error("Export failed:", error);
