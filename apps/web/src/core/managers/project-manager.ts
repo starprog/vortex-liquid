@@ -1,5 +1,6 @@
 import type { EditorCore } from "@/core";
 import type {
+	TCanvasSize,
 	TProject,
 	TProjectMetadata,
 	TProjectSortKey,
@@ -79,7 +80,13 @@ export class ProjectManager {
 		await this.storageMigrationPromise;
 	}
 
-	async createNewProject({ name }: { name: string }): Promise<string> {
+	async createNewProject({
+		name,
+		canvasSize,
+	}: {
+		name: string;
+		canvasSize?: TCanvasSize;
+	}): Promise<string> {
 		const mainScene = buildDefaultScene({ name: "Main scene", isMain: true });
 		const newProject: TProject = {
 			metadata: {
@@ -93,7 +100,7 @@ export class ProjectManager {
 			currentSceneId: mainScene.id,
 			settings: {
 				fps: DEFAULT_FPS,
-				canvasSize: DEFAULT_CANVAS_SIZE,
+				canvasSize: canvasSize ?? DEFAULT_CANVAS_SIZE,
 				canvasSizeMode: "preset",
 				lastCustomCanvasSize: null,
 				originalCanvasSize: null,
