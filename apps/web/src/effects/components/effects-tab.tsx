@@ -1,12 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import type { ParamValues } from "@/params";
+import type { ParamDefinition, ParamValue, ParamValues } from "@/params";
 import type { Effect } from "@/effects/types";
-import type { EffectElement, VisualElement } from "@/timeline";
+import type { EffectElement, TimelineElement, VisualElement } from "@/timeline";
 import { effectsRegistry } from "@/effects";
+import { buildEffectParamPath, resolveAnimationPathValueAtTime } from "@/animation";
+import type { ElementAnimations } from "@/animation/types";
+import type { MediaTime } from "@/wasm";
 import { useEditor } from "@/editor/use-editor";
 import { useElementPreview } from "@/timeline/hooks/use-element-preview";
+import { useElementPlayhead } from "@/components/editor/panels/properties/hooks/use-element-playhead";
+import { useKeyframedParamProperty } from "@/components/editor/panels/properties/hooks/use-keyframed-param-property";
 import {
 	Section,
 	SectionContent,
@@ -34,10 +39,14 @@ export function StandaloneEffectTab({
 	element: EffectElement;
 	trackId: string;
 }) {
-	const { renderElement, previewUpdates, commit } = useElementPreview({
+	const { renderElement } = useElementPreview({
 		trackId,
 		elementId: element.id,
 		fallback: element,
+	});
+	const { localTime, isPlayheadWithinElementRange } = useElementPlayhead({
+		startTime: element.startTime,
+		duration: element.duration,
 	});
 
 	const effect: Effect = {
@@ -47,11 +56,15 @@ export function StandaloneEffectTab({
 		enabled: true,
 	};
 
-	const previewParam = (key: string) => (value: number | string | boolean) => {
-		previewUpdates({
-			params: { ...(renderElement as EffectElement).params, [key]: value },
-		});
-	};
+	const buildBaseUpdates = ({
+		key,
+		value,
+	}: {
+		key: string;
+		value: ParamValue;
+	}): Partial<TimelineElement> => ({
+		params: { ...(renderElement as EffectElement).params, [key]: value },
+	});
 
 	return (
 		<div className="flex flex-col h-full">
@@ -60,9 +73,13 @@ export function StandaloneEffectTab({
 			</div>
 			<EffectSection
 				effect={effect}
+				trackId={trackId}
+				elementId={element.id}
+				animations={element.animations}
+				localTime={localTime}
+				isPlayheadWithinElementRange={isPlayheadWithinElementRange}
 				renderParams={(renderElement as EffectElement).params}
-				previewParam={previewParam}
-				onCommit={commit}
+				buildBaseUpdates={buildBaseUpdates}
 			/>
 		</div>
 	);
@@ -78,10 +95,14 @@ export function ClipEffectsTab({
 	const [dragIndex, setDragIndex] = useState<number | null>(null);
 	const [dropIndex, setDropIndex] = useState<number | null>(null);
 	const editor = useEditor();
-	const { renderElement, previewUpdates, commit } = useElementPreview({
+	const { renderElement } = useElementPreview({
 		trackId,
 		elementId: element.id,
 		fallback: element,
+	});
+	const { localTime, isPlayheadWithinElementRange } = useElementPlayhead({
+		startTime: element.startTime,
+		duration: element.duration,
 	});
 
 	const effects: Effect[] = element.effects ?? [];
@@ -95,19 +116,15 @@ export function ClipEffectsTab({
 		);
 	};
 
-	const buildPreviewParam =
+	const buildBaseUpdates =
 		(effectId: string) =>
-		(key: string) =>
-		(value: number | string | boolean) => {
-			const updatedEffects = (
-				(renderElement as VisualElement).effects ?? []
-			).map((existing) =>
+		({ key, value }: { key: string; value: ParamValue }): Partial<TimelineElement> => ({
+			effects: ((renderElement as VisualElement).effects ?? []).map((existing) =>
 				existing.id !== effectId
 					? existing
 					: { ...existing, params: { ...existing.params, [key]: value } },
-			);
-			previewUpdates({ effects: updatedEffects });
-		};
+			),
+		});
 
 	const handleDragStart = ({ index }: { index: number }) => setDragIndex(index);
 
@@ -176,9 +193,13 @@ export function ClipEffectsTab({
 							>
 								<EffectSection
 									effect={effect}
+									trackId={trackId}
+									elementId={element.id}
+									animations={element.animations}
+									localTime={localTime}
+									isPlayheadWithinElementRange={isPlayheadWithinElementRange}
 									renderParams={getRenderParams({ effectId: effect.id })}
-									previewParam={buildPreviewParam(effect.id)}
-									onCommit={commit}
+									buildBaseUpdates={buildBaseUpdates(effect.id)}
 									onToggle={() =>
 										editor.timeline.toggleClipEffect({
 											trackId,
@@ -232,16 +253,27 @@ function EmptyView() {
 
 function EffectSection({
 	effect,
+	trackId,
+	elementId,
+	animations,
+	localTime,
+	isPlayheadWithinElementRange,
 	renderParams,
-	previewParam,
-	onCommit,
+	buildBaseUpdates,
 	onToggle,
 	onRemove,
 }: {
 	effect: Effect;
+	trackId: string;
+	elementId: string;
+	animations: ElementAnimations | undefined;
+	localTime: MediaTime;
+	isPlayheadWithinElementRange: boolean;
 	renderParams: ParamValues;
-	previewParam: (key: string) => (value: number | string | boolean) => void;
-	onCommit: () => void;
+	buildBaseUpdates: (params: {
+		key: string;
+		value: ParamValue;
+	}) => Partial<TimelineElement>;
 	onToggle?: () => void;
 	onRemove?: () => void;
 }) {
@@ -290,20 +322,88 @@ function EffectSection({
 			>
 				<SectionFields>
 					{definition.params.map((param) => (
-						<div key={param.key} className="flex flex-col gap-3.5">
-							<div className="px-4">
-								<PropertyParamField
-									param={param}
-									value={renderParams[param.key] ?? param.default}
-									onPreview={previewParam(param.key)}
-									onCommit={onCommit}
-								/>
-							</div>
-							<Separator />
-						</div>
+						<EffectParamField
+							key={param.key}
+							param={param}
+							renderValue={renderParams[param.key] ?? param.default}
+							effectId={effect.id}
+							trackId={trackId}
+							elementId={elementId}
+							animations={animations}
+							localTime={localTime}
+							isPlayheadWithinElementRange={isPlayheadWithinElementRange}
+							buildBaseUpdates={buildBaseUpdates}
+						/>
 					))}
 				</SectionFields>
 			</SectionContent>
 		</Section>
+	);
+}
+
+function EffectParamField({
+	param,
+	renderValue,
+	effectId,
+	trackId,
+	elementId,
+	animations,
+	localTime,
+	isPlayheadWithinElementRange,
+	buildBaseUpdates,
+}: {
+	param: ParamDefinition;
+	renderValue: ParamValue;
+	effectId: string;
+	trackId: string;
+	elementId: string;
+	animations: ElementAnimations | undefined;
+	localTime: MediaTime;
+	isPlayheadWithinElementRange: boolean;
+	buildBaseUpdates: (params: {
+		key: string;
+		value: ParamValue;
+	}) => Partial<TimelineElement>;
+}) {
+	const propertyPath = buildEffectParamPath({ effectId, paramKey: param.key });
+	const resolvedValue = resolveAnimationPathValueAtTime({
+		animations,
+		propertyPath,
+		localTime,
+		fallbackValue: renderValue,
+	});
+	const animatedParam = useKeyframedParamProperty({
+		param,
+		trackId,
+		elementId,
+		animations,
+		propertyPath,
+		localTime,
+		isPlayheadWithinElementRange,
+		resolvedValue,
+		buildBaseUpdates: ({ value }) => buildBaseUpdates({ key: param.key, value }),
+	});
+
+	return (
+		<div className="flex flex-col gap-3.5">
+			<div className="px-4">
+				<PropertyParamField
+					param={param}
+					value={resolvedValue}
+					onPreview={animatedParam.onPreview}
+					onCommit={animatedParam.onCommit}
+					keyframe={
+						param.keyframable === false
+							? undefined
+							: {
+									isActive: animatedParam.isKeyframedAtTime,
+									isDisabled: !isPlayheadWithinElementRange,
+									onToggle: animatedParam.toggleKeyframe,
+								}
+					}
+				/>
+			</div>
+			<Separator />
+		</div>
 	);
 }

@@ -1,15 +1,25 @@
 import type { FrameRate } from "opencut-wasm";
+import type { EffectPass } from "@/effects/types";
 import type { AnyBaseNode } from "./nodes/base-node";
 import { createCanvasSurface } from "./canvas-utils";
 import { buildFrameDescriptor } from "./compositor/frame-descriptor";
 import type { FrameDescriptor, TextureUploadDescriptor } from "./compositor/types";
 import { wasmCompositor } from "./compositor/wasm-compositor";
+import { gpuRenderer } from "./gpu-renderer";
 import { resolveRenderTree } from "./resolve";
 import {
 	measureSpanAsync,
 	measureSpanSync,
 	onRenderPerfFrameComplete,
 } from "@/diagnostics/render-perf";
+
+function flattenEffectPassGroups({
+	groups,
+}: {
+	groups: EffectPass[][];
+}): EffectPass[] {
+	return groups.flat();
+}
 
 export type CanvasRendererParams = {
 	width: number;
@@ -136,6 +146,11 @@ export class CanvasRenderer {
 
 		const textureMap = new Map(textures.map((texture) => [texture.id, texture]));
 		for (const item of frame.items) {
+			if (item.type === "sceneEffect") {
+				this.applySceneEffect({ outputCtx, frame, item });
+				continue;
+			}
+
 			if (item.type !== "layer") {
 				continue;
 			}
@@ -157,22 +172,81 @@ export class CanvasRenderer {
 			const drawX = item.transform.centerX - drawWidth / 2;
 			const drawY = item.transform.centerY - drawHeight / 2;
 
-			if (texture.kind === "rendered") {
-				const tempCanvas = document.createElement("canvas");
-				tempCanvas.width = Math.max(1, texture.width);
-				tempCanvas.height = Math.max(1, texture.height);
-				const tempCtx = tempCanvas.getContext("2d");
-				if (tempCtx) {
-					tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
-					texture.draw(tempCtx);
-					outputCtx.drawImage(tempCanvas, drawX, drawY, drawWidth, drawHeight);
-				}
-			} else {
-				outputCtx.drawImage(texture.source, drawX, drawY, drawWidth, drawHeight);
+			const drawSource = this.resolveLayerDrawSource({
+				texture,
+				passes: flattenEffectPassGroups({ groups: item.effectPassGroups }),
+			});
+			if (drawSource) {
+				outputCtx.drawImage(drawSource, drawX, drawY, drawWidth, drawHeight);
 			}
 
 			outputCtx.restore();
 		}
+	}
+
+	private resolveLayerDrawSource({
+		texture,
+		passes,
+	}: {
+		texture: TextureUploadDescriptor;
+		passes: EffectPass[];
+	}): CanvasImageSource | null {
+		const width = Math.max(1, texture.width);
+		const height = Math.max(1, texture.height);
+
+		if (texture.kind === "rendered") {
+			const { canvas, context } = createCanvasSurface({ width, height });
+			context.clearRect(0, 0, width, height);
+			texture.draw(context);
+			return passes.length > 0
+				? gpuRenderer.applyEffect({ source: canvas, width, height, passes })
+				: canvas;
+		}
+
+		if (passes.length === 0) {
+			return texture.source;
+		}
+
+		const { canvas, context } = createCanvasSurface({ width, height });
+		context.drawImage(texture.source, 0, 0, width, height);
+		return gpuRenderer.applyEffect({ source: canvas, width, height, passes });
+	}
+
+	// Applies a standalone effect-track element to everything composited below it so
+	// far, i.e. a post-process pass over the current output rather than one layer.
+	private applySceneEffect({
+		outputCtx,
+		frame,
+		item,
+	}: {
+		outputCtx: CanvasRenderingContext2D;
+		frame: FrameDescriptor;
+		item: Extract<FrameDescriptor["items"][number], { type: "sceneEffect" }>;
+	}): void {
+		const passes = flattenEffectPassGroups({ groups: item.effectPassGroups });
+		if (passes.length === 0) {
+			return;
+		}
+
+		const { canvas: snapshot, context: snapshotCtx } = createCanvasSurface({
+			width: frame.width,
+			height: frame.height,
+		});
+		snapshotCtx.drawImage(this.outputCanvas, 0, 0, frame.width, frame.height);
+
+		const result = gpuRenderer.applyEffect({
+			source: snapshot,
+			width: frame.width,
+			height: frame.height,
+			passes,
+		});
+
+		outputCtx.save();
+		outputCtx.setTransform(1, 0, 0, 1, 0, 0);
+		outputCtx.globalAlpha = 1;
+		outputCtx.clearRect(0, 0, frame.width, frame.height);
+		outputCtx.drawImage(result, 0, 0, frame.width, frame.height);
+		outputCtx.restore();
 	}
 
 	async renderToCanvas({

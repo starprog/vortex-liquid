@@ -201,12 +201,16 @@ function ExportPopover({
 			const exportUrl =
 				(globalThis as Window & { vortexExportUrl?: string }).vortexExportUrl ??
 				`/portal/vortex-liquid/designer/${activeProject.metadata.id}/export`;
+			const csrfToken = (globalThis as Window & { vortexCsrfToken?: string })
+				.vortexCsrfToken;
 
 			try {
 				const response = await fetch(exportUrl, {
 					method: "POST",
+					credentials: "same-origin",
 					headers: {
 						Accept: "application/json",
+						...(csrfToken ? { "X-CSRF-TOKEN": csrfToken } : {}),
 					},
 					body: (() => {
 						const formData = new FormData();

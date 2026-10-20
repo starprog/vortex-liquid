@@ -174,7 +174,7 @@ function PreviewCanvas({
 		viewportRef,
 		viewportWidth: viewportSize.width,
 	});
-	const { canPan, panByScreenDelta, scaleZoom } = viewport;
+	const { canPan, panByScreenDelta, scaleZoom, sceneLeft, sceneTop, sceneWidth, sceneHeight } = viewport;
 
 	useEffect(() => {
 		console.log("PreviewCanvas mounted", {
@@ -473,10 +473,10 @@ function PreviewCanvas({
 								data-preview-mount="true"
 								className="absolute block border"
 								style={{
-									left: 0,
-									top: 0,
-									width: "100%",
-									height: "100%",
+									left: sceneLeft,
+									top: sceneTop,
+									width: sceneWidth,
+									height: sceneHeight,
 									background:
 										activeProject.settings.background.type === "blur"
 											? "transparent"
