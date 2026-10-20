@@ -3,6 +3,7 @@ import { effectsRegistry, resolveEffectPasses } from "@/effects";
 import { buildDefaultParamValues } from "@/params/registry";
 import type { ParamValues } from "@/params";
 import { gpuRenderer } from "./gpu-renderer";
+import { DEFAULT_CANVAS_SIZE } from "@/canvas/sizes";
 
 const PREVIEW_SIZE = 160;
 // Hardcoded absolute path isn't rewritten by Next's basePath/assetPrefix, so prefix manually.
@@ -65,11 +66,15 @@ class EffectPreviewService {
 					? params
 					: buildDefaultParamValues(definition.params);
 
+			// Effect intensity is scaled by (resolution / reference), so computing it against the
+			// tiny preview canvas size collapses most default intensities to a sub-pixel (invisible)
+			// sigma. Use the real project reference resolution instead - the resulting sigma is still
+			// applied to the small preview canvas/texture, which makes the effect clearly visible.
 			const passes = resolveEffectPasses({
 				definition,
 				effectParams: resolvedParams,
-				width: uniformDimensions?.width ?? size,
-				height: uniformDimensions?.height ?? size,
+				width: uniformDimensions?.width ?? DEFAULT_CANVAS_SIZE.width,
+				height: uniformDimensions?.height ?? DEFAULT_CANVAS_SIZE.height,
 			});
 			const result = this.applyGpuEffect({
 				source,

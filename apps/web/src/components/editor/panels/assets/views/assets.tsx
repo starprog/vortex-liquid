@@ -655,6 +655,24 @@ function MediaPreview({
 			);
 		}
 
+		// No generated thumbnail yet - fall back to the browser's own first video frame.
+		if (item.url) {
+			return (
+				<div className="relative size-full">
+					<video
+						src={item.url}
+						preload="metadata"
+						muted
+						playsInline
+						className="size-full rounded object-cover"
+					/>
+					{shouldShowDurationBadge ? (
+						<MediaDurationBadge duration={item.duration} />
+					) : null}
+				</div>
+			);
+		}
+
 		return (
 			<MediaTypePlaceholder
 				icon={Video01Icon}
@@ -863,6 +881,18 @@ function LibraryAssetCard({
 					className="object-cover"
 					loading="lazy"
 					unoptimized
+				/>
+				<MediaDurationBadge duration={asset.duration} />
+			</div>
+		) : asset.type === "video" ? (
+			// No generated thumbnail yet - fall back to the browser's own first video frame.
+			<div className="relative size-full">
+				<video
+					src={asset.url}
+					preload="metadata"
+					muted
+					playsInline
+					className="size-full object-cover"
 				/>
 				<MediaDurationBadge duration={asset.duration} />
 			</div>
